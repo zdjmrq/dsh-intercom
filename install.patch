@@ -1,0 +1,132 @@
+diff --git a/packages/api/remotes/package.json b/packages/api/remotes/package.json
+index 5ad4a0c9b1..6f8020bbeb 100644
+--- a/packages/api/remotes/package.json
++++ b/packages/api/remotes/package.json
+@@ -67,6 +67,7 @@
+     "@deepseek-ai/dsh-cordis-host-runner": "workspace:^",
+     "@deepseek-ai/dsh-host-plugin-inventory": "workspace:^",
+     "@deepseek-ai/dsh-host-restart": "workspace:^",
++    "@deepseek-ai/dsh-host-intercom": "workspace:^",
+     "@deepseek-ai/dsh-invariants": "workspace:^",
+     "@deepseek-ai/dsh-agent-presets": "workspace:^",
+     "@deepseek-ai/dsh-llm": "workspace:^",
+@@ -85,6 +86,7 @@
+     "@deepseek-ai/dsh-cordis-host-runner": "workspace:^",
+     "@deepseek-ai/dsh-host-plugin-inventory": "workspace:^",
+     "@deepseek-ai/dsh-host-restart": "workspace:^",
++    "@deepseek-ai/dsh-host-intercom": "workspace:^",
+     "@deepseek-ai/dsh-invariants": "workspace:^",
+     "@deepseek-ai/dsh-agent-presets": "workspace:^",
+     "@deepseek-ai/dsh-llm": "workspace:^",
+diff --git a/packages/api/remotes/src/client/index.ts b/packages/api/remotes/src/client/index.ts
+index 23da1d306f..bddf270f97 100644
+--- a/packages/api/remotes/src/client/index.ts
++++ b/packages/api/remotes/src/client/index.ts
+@@ -7,6 +7,7 @@ import dynamicRemote from '@deepseek-ai/dsh-cordis-host-runner/remote'
+ import pluginInventoryRemote from '@deepseek-ai/dsh-host-plugin-inventory/remote'
+ import messageFeedbackRemote from '@deepseek-ai/dsh-message-feedback/remote'
+ import restartRemote from '@deepseek-ai/dsh-host-restart/remote'
++import intercomRemote from '@deepseek-ai/dsh-host-intercom/remote'
+ import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol'
+ 
+ export type { TypertClientRemote as ClientRemote } from '@deepseek-ai/dsh-typert-protocol'
+@@ -17,6 +18,7 @@ export type {} from '@deepseek-ai/dsh-goal/remote'
+ export type {} from '@deepseek-ai/dsh-host-plugin-inventory/remote'
+ export type {} from '@deepseek-ai/dsh-message-feedback/remote'
+ export type {} from '@deepseek-ai/dsh-host-restart/remote'
++export type {} from '@deepseek-ai/dsh-host-intercom/remote'
+ // The forwarded-event allowlist's selection seat: without it in the consumer's
+ // compilation face `TypertRemoteEvent` is `never` and every `$on` call fails.
+ export type { ApiRemoteForwardedEvent } from '../types.ts'
+@@ -109,7 +111,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
+   const disposers: Array<() => Promise<void>> = []
+   try {
+     for (const contribution of [
+-      commandsRemote, goalsRemote, dynamicRemote, pluginInventoryRemote, messageFeedbackRemote, restartRemote,
++      commandsRemote, goalsRemote, dynamicRemote, pluginInventoryRemote, messageFeedbackRemote, restartRemote, intercomRemote,
+     ]) {
+       disposers.push(await ctx.remote.$mount(contribution))
+     }
+diff --git a/packages/api/remotes/tsconfig.client.json b/packages/api/remotes/tsconfig.client.json
+index 699d0ba7b7..ed4e738e49 100644
+--- a/packages/api/remotes/tsconfig.client.json
++++ b/packages/api/remotes/tsconfig.client.json
+@@ -39,6 +39,9 @@
+     {
+       "path": "../../host/restart"
+     },
++    {
++      "path": "../../host/intercom"
++    },
+     {
+       "path": "../../interaction/commands"
+     },
+diff --git a/packages/bundle/web-app/cordis.patch.yml b/packages/bundle/web-app/cordis.patch.yml
+index 0fdde481e8..0dede2b226 100644
+--- a/packages/bundle/web-app/cordis.patch.yml
++++ b/packages/bundle/web-app/cordis.patch.yml
+@@ -98,6 +98,11 @@
+     - id: restart
+       name: '@deepseek-ai/dsh-host-restart'
+ 
++    # Inter-conversation communication center: peer messaging, groups and
++    # model tools over the intercom Host Remote.
++    - id: intercom
++      name: '@deepseek-ai/dsh-host-intercom'
++
+     # The API gateway: the transport-agnostic dispatch face every client shape
+     # shares. The base layer's agent-default-model service owns the default model.
+     - id: api-gateway
+@@ -204,6 +209,11 @@
+     - id: ui-settings-restart
+       name: '@deepseek-ai/dsh-client-ui-settings-restart'
+ 
++    # Intercom communication center: chat-style panel over the intercom Host
++    # Remote (conversation list, groups, peer messaging).
++    - id: ui-intercom
++      name: '@deepseek-ai/dsh-client-ui-intercom'
++
+     - id: ui-conversation
+       name: '@deepseek-ai/dsh-client-ui-conversation'
+ 
+diff --git a/packages/bundle/web-app/package.json b/packages/bundle/web-app/package.json
+index 5d86b86eab..ae6277ef96 100644
+--- a/packages/bundle/web-app/package.json
++++ b/packages/bundle/web-app/package.json
+@@ -66,6 +66,7 @@
+     "@deepseek-ai/dsh-client-ui-settings-models": "workspace:^",
+     "@deepseek-ai/dsh-client-ui-settings-plugin-inventory": "workspace:^",
+     "@deepseek-ai/dsh-client-ui-settings-restart": "workspace:^",
++    "@deepseek-ai/dsh-client-ui-intercom": "workspace:^",
+     "@deepseek-ai/dsh-client-ui-permission-presets": "workspace:^",
+     "@deepseek-ai/dsh-client-ui-plan": "workspace:^",
+     "@deepseek-ai/dsh-client-ui-settings-plugins": "workspace:^",
+@@ -94,6 +95,7 @@
+     "@deepseek-ai/dsh-host-directory-picker-native": "workspace:^",
+     "@deepseek-ai/dsh-host-plugin-inventory": "workspace:^",
+     "@deepseek-ai/dsh-host-restart": "workspace:^",
++    "@deepseek-ai/dsh-host-intercom": "workspace:^",
+     "@deepseek-ai/dsh-host-webserver": "workspace:^",
+     "@deepseek-ai/dsh-message-feedback": "workspace:^",
+     "@deepseek-ai/dsh-session-projection-cache": "workspace:^",
+diff --git a/tsconfig.host.json b/tsconfig.host.json
+index db650d4131..1c82c89bc4 100644
+--- a/tsconfig.host.json
++++ b/tsconfig.host.json
+@@ -295,6 +295,7 @@
+     { "path": "./packages/lsp/lsp-stdio" },
+     { "path": "./packages/lsp/tool-lsp" },
+     { "path": "./packages/host/restart" },
++    { "path": "./packages/host/intercom" },
+     { "path": "./apps/cli" }
+   ]
+ }
+diff --git a/tsconfig.client.json b/tsconfig.client.json
+--- a/tsconfig.client.json
++++ b/tsconfig.client.json
+@@ -94,4 +94,5 @@
+     { "path": "./packages/client/ui-settings-restart" },
+     { "path": "./packages/client/locale" },
+     { "path": "./packages/client/web" },
++    { "path": "./packages/client/ui-intercom" },
+     { "path": "./apps/web" }
