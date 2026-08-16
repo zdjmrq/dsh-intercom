@@ -53,6 +53,7 @@ pnpm --filter @deepseek-ai/dsh-api-remotes bundle
 
 - [dsh-plugin-suite](https://github.com/zdjmrq/dsh-plugin-suite) — 定制插件套件(局部 fork),含 `dsh-restart-plugin` 与 `dsh-careful-full-access` 的累计补丁,一次性安装全部功能;
 - [dsh-restart-plugin](https://github.com/zdjmrq/dsh-restart-plugin) — 一键关闭后台服务 / 刷新前端(保留热插件);
+- [dsh-text-open-source](https://github.com/zdjmrq/dsh-text-open-source) — 「文字开源」枢纽仓库:本插件的可复刻文字描述见 [plugins/dsh-intercom.md](https://github.com/zdjmrq/dsh-text-open-source/blob/main/plugins/dsh-intercom.md)(不依赖代码即可复刻、便于理解与微调);
 - [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) — 官方上游。
 
 ## License
