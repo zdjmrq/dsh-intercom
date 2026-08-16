@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-host-intercom/remote'
-import { createElement as h, useEffect, useState, type FunctionComponent } from 'react'
+import { createElement as h, useEffect, useRef, useState, type FunctionComponent } from 'react'
 
 const ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244"/></svg>'
 const CLOSE_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>'
@@ -20,7 +20,7 @@ const CLOSE_ICON = '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" 
 const STYLES = `
   .dsh-ic-panel { position: fixed; top: 60px; right: 16px; width: 384px; max-height: calc(100vh - 96px); overflow: auto; background: var(--dsw-alias-bg-overlay, #ffffff); color: var(--dsw-alias-label-primary, #1f2328); border: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12)); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.22); font: 13.5px/1.5 system-ui, -apple-system, sans-serif; pointer-events: auto; z-index: 1000; display: flex; flex-direction: column; }
   .dsh-ic-panel.dsh-ic-wide { width: 680px; height: min(76vh, 560px); overflow: hidden; }
-  .dsh-ic-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); flex: none; }
+  .dsh-ic-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); flex: none; cursor: move; user-select: none; -webkit-user-select: none; }
   .dsh-ic-head-title { font-size: 14.5px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dsh-ic-head-title svg { vertical-align: -2px; margin-right: 6px; color: var(--dsw-alias-brand-primary, #0b57d0); }
   .dsh-ic-sec-title { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-secondary, #6b7280); margin: 2px 0 6px; }
@@ -120,6 +120,15 @@ interface UiStore {
 
 /** Structural event type for owned input handlers. */
 type ValueEvent = { target: { value: string } }
+
+/** Structural event type for owned drag handlers. */
+type MouseEventLike = {
+  button: number
+  clientX: number
+  clientY: number
+  currentTarget: HTMLElement
+  target: EventTarget | null
+}
 
 export const inject = ['slots', 'locale', 'remote', 'remote.intercom', 'sessions', 'workspaces']
 
@@ -221,6 +230,37 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
   const [feedback, setFeedback] = useState<{ text: string; tone: string }>({ text: '', tone: '' })
 
   const say = (message: string, tone = ''): void => { setFeedback({ text: message, tone }) }
+
+  // Draggable panel: dragging the header moves the whole window (buttons excluded).
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null)
+  const onHeadMouseDown = (e: MouseEventLike): void => {
+    if (e.button !== 0) return
+    if ((e.target as HTMLElement | null)?.closest?.('button')) return
+    const panel = e.currentTarget.parentElement
+    if (panel === null) return
+    const rect = panel.getBoundingClientRect()
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top }
+    document.body.style.userSelect = 'none'
+    const onMove = (ev: MouseEvent): void => {
+      const d = dragRef.current
+      if (d === null) return
+      const width = 680
+      const maxX = Math.max(0, window.innerWidth - 120)
+      const maxY = Math.max(0, window.innerHeight - 60)
+      const x = Math.min(Math.max(d.origX + ev.clientX - d.startX, 120 - width), maxX)
+      const y = Math.min(Math.max(d.origY + ev.clientY - d.startY, 0), maxY)
+      setPos({ x, y })
+    }
+    const onUp = (): void => {
+      dragRef.current = null
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   const refreshLists = async (): Promise<void> => {
     try {
@@ -410,8 +450,8 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
   // The group tab shows the newest activity first (the relay feed above it already leads with the freshest directed traffic).
   const displayEntries = tab === 'group' ? [...entries].reverse() : entries
 
-  return h('div', { className: 'dsh-ic-panel dsh-ic-wide' },
-    h('div', { className: 'dsh-ic-head' },
+  return h('div', { className: 'dsh-ic-panel dsh-ic-wide', style: pos === null ? undefined : { left: pos.x, top: pos.y } },
+    h('div', { className: 'dsh-ic-head', onMouseDown: onHeadMouseDown },
       h('span', { className: 'dsh-ic-head-title', dangerouslySetInnerHTML: { __html: ICON + 'Intercom 通信中心' } }),
       h('button', { className: 'dsh-ic-btn', onClick: startNew, title: '新建会话' }, '＋ 新会话'),
       h('button', { className: 'dsh-ic-btn', onClick: () => { void forkCurrent() }, disabled: store.currentSessionId === '', title: 'Fork 当前会话' }, 'Fork'),

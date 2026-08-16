@@ -5,20 +5,13 @@ window.__ModuleLoader__.load({
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
-		//#region lib/types/client/index.js
-		/**
-		* Browser half of the intercom plugin: the chat-style communication center.
-		* Left column lists top-level conversations and coordination groups; the right
-		* pane shows the message history and the single composer. Backed by the
-		* intercom Host Remote (`ctx.remote.intercom`).
-		* @module @deepseek-ai/dsh-client-ui-intercom/client
-		*/
+		//#region src/client/index.ts
 		const ICON = "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244\"/></svg>";
 		const CLOSE_ICON = "<svg viewBox=\"0 0 16 16\" width=\"15\" height=\"15\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M4 4l8 8M12 4l-8 8\"/></svg>";
 		const STYLES = `
   .dsh-ic-panel { position: fixed; top: 60px; right: 16px; width: 384px; max-height: calc(100vh - 96px); overflow: auto; background: var(--dsw-alias-bg-overlay, #ffffff); color: var(--dsw-alias-label-primary, #1f2328); border: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12)); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.22); font: 13.5px/1.5 system-ui, -apple-system, sans-serif; pointer-events: auto; z-index: 1000; display: flex; flex-direction: column; }
   .dsh-ic-panel.dsh-ic-wide { width: 680px; height: min(76vh, 560px); overflow: hidden; }
-  .dsh-ic-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); flex: none; }
+  .dsh-ic-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); flex: none; cursor: move; user-select: none; -webkit-user-select: none; }
   .dsh-ic-head-title { font-size: 14.5px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dsh-ic-head-title svg { vertical-align: -2px; margin-right: 6px; color: var(--dsw-alias-brand-primary, #0b57d0); }
   .dsh-ic-sec-title { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-secondary, #6b7280); margin: 2px 0 6px; }
@@ -202,6 +195,41 @@ window.__ModuleLoader__.load({
 					text: message,
 					tone
 				});
+			};
+			const [pos, setPos] = (0, react.useState)(null);
+			const dragRef = (0, react.useRef)(null);
+			const onHeadMouseDown = (e) => {
+				if (e.button !== 0) return;
+				if (e.target?.closest?.("button")) return;
+				const panel = e.currentTarget.parentElement;
+				if (panel === null) return;
+				const rect = panel.getBoundingClientRect();
+				dragRef.current = {
+					startX: e.clientX,
+					startY: e.clientY,
+					origX: rect.left,
+					origY: rect.top
+				};
+				document.body.style.userSelect = "none";
+				const onMove = (ev) => {
+					const d = dragRef.current;
+					if (d === null) return;
+					const width = 680;
+					const maxX = Math.max(0, window.innerWidth - 120);
+					const maxY = Math.max(0, window.innerHeight - 60);
+					setPos({
+						x: Math.min(Math.max(d.origX + ev.clientX - d.startX, 120 - width), maxX),
+						y: Math.min(Math.max(d.origY + ev.clientY - d.startY, 0), maxY)
+					});
+				};
+				const onUp = () => {
+					dragRef.current = null;
+					document.body.style.userSelect = "";
+					window.removeEventListener("mousemove", onMove);
+					window.removeEventListener("mouseup", onUp);
+				};
+				window.addEventListener("mousemove", onMove);
+				window.addEventListener("mouseup", onUp);
 			};
 			const refreshLists = async () => {
 				try {
@@ -449,7 +477,16 @@ window.__ModuleLoader__.load({
 			const addCandidates = conversations.filter((c) => currentGroup === void 0 || !currentGroup.members.includes(c.id));
 			const entries = tab === "conv" ? convEntries : groupEntries;
 			const displayEntries = tab === "group" ? [...entries].reverse() : entries;
-			return (0, react.createElement)("div", { className: "dsh-ic-panel dsh-ic-wide" }, (0, react.createElement)("div", { className: "dsh-ic-head" }, (0, react.createElement)("span", {
+			return (0, react.createElement)("div", {
+				className: "dsh-ic-panel dsh-ic-wide",
+				style: pos === null ? void 0 : {
+					left: pos.x,
+					top: pos.y
+				}
+			}, (0, react.createElement)("div", {
+				className: "dsh-ic-head",
+				onMouseDown: onHeadMouseDown
+			}, (0, react.createElement)("span", {
 				className: "dsh-ic-head-title",
 				dangerouslySetInnerHTML: { __html: "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244\"/></svg>Intercom 通信中心" }
 			}), (0, react.createElement)("button", {
