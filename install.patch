@@ -121,6 +121,25 @@ index db650d4131..1c82c89bc4 100644
      { "path": "./apps/cli" }
    ]
  }
+diff --git a/tsconfig.base.json b/tsconfig.base.json
+--- a/tsconfig.base.json
++++ b/tsconfig.base.json
+@@ -171,6 +171,7 @@
+       "@deepseek-ai/dsh-host-frontend-static": ["./packages/host/frontend-static/src"],
+       "@deepseek-ai/dsh-host-plugin-inventory": ["./packages/host/plugin-inventory/src"],
+       "@deepseek-ai/dsh-host-plugin-inventory/types": ["./packages/host/plugin-inventory/src/types.ts"],
++      "@deepseek-ai/dsh-host-intercom": ["./packages/host/intercom/src"],
+       "@deepseek-ai/dsh-client-ui-slots": ["./packages/client/ui-slots/src"],
+       "@deepseek-ai/dsh-client-ui-attachment": ["./packages/client/ui-attachment/src"],
+       "@deepseek-ai/dsh-client-ui-primitives": ["./packages/client/ui-primitives/src"],
+@@ -196,6 +196,7 @@
+       "@deepseek-ai/dsh-client-ui-sidebar": ["./packages/client/ui-sidebar/src"],
+       "@deepseek-ai/dsh-client-ui-conversation": ["./packages/client/ui-conversation/src"],
++      "@deepseek-ai/dsh-client-ui-intercom": ["./packages/client/ui-intercom/src"],
+       "@deepseek-ai/dsh-client-ui-tool": ["./packages/client/ui-tool/src"],
+       "@deepseek-ai/dsh-client-ui-deliverables": ["./packages/client/ui-deliverables/src"],
+       "@deepseek-ai/dsh-client-ui-workflow-run": ["./packages/client/ui-workflow-run/src"],
+       "@deepseek-ai/dsh-client-ui-input-trigger": ["./packages/client/ui-input-trigger/src"],
 diff --git a/tsconfig.client.json b/tsconfig.client.json
 --- a/tsconfig.client.json
 +++ b/tsconfig.client.json

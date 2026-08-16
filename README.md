@@ -20,7 +20,7 @@ DSH 网页插件：**顶层会话(父代理)之间的通信中心**——在线�
 把本仓库集成到你的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 源码工作区(按源码方式安装):
 
 1. 将 `packages/host/intercom` 与 `packages/client/ui-intercom` 两个目录复制到工作区的 `packages/host/` 与 `packages/client/` 下;
-2. 在工作区根目录执行 `git apply install.patch`(含 api-remotes 挂载、web-app 组合注册、根 tsconfig 引用;如版本有出入请对照补丁手工合并);
+2. 在工作区根目录执行 `git apply install.patch`(含 api-remotes 挂载、web-app 组合注册、根 tsconfig 引用与 paths 映射;如版本有出入请对照补丁手工合并);
 3. 安装与构建:
 
 ```powershell
@@ -30,7 +30,6 @@ pnpm exec tsc -b tsconfig.client.json
 pnpm --filter @deepseek-ai/dsh-host-intercom bundle
 pnpm --filter @deepseek-ai/dsh-client-ui-intercom bundle
 pnpm --filter @deepseek-ai/dsh-api-remotes bundle
-npm run build:lib:client
 ```
 
 4. 重启后台(例如 `pnpm dsh web`),刷新页面后即可在侧栏底部看到「通信中心」入口。
