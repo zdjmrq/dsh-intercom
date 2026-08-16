@@ -1,0 +1,4 @@
+# install.patch must stay LF: git apply on Windows rejects CRLF patches,
+# and core.autocrlf would otherwise rewrite it on checkout.
+install.patch -text
+*.patch -text eol=lf
