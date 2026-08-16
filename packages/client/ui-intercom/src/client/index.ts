@@ -68,6 +68,11 @@ const STYLES = `
   .dsh-ic-msg.user { align-self: flex-end; background: var(--dsw-alias-brand-primary, #0b57d0); color: #fff; border-bottom-right-radius: 3px; }
   .dsh-ic-msg.assistant { align-self: flex-start; background: var(--dsw-alias-bg-layer-2, rgba(0,0,0,.05)); color: var(--dsw-alias-label-primary, #1f2328); border-bottom-left-radius: 3px; }
   .dsh-ic-msg-from { display: block; font-size: 11px; color: var(--dsw-alias-label-secondary, #6b7280); margin-bottom: 2px; }
+  .dsh-ic-relays { flex: none; max-height: 42%; overflow: auto; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .dsh-ic-relays-title { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-secondary, #6b7280); }
+  .dsh-ic-relay { border-left: 3px solid var(--dsw-alias-brand-primary, #0b57d0); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #0b57d0) 7%, transparent); border-radius: 6px; padding: 6px 8px; }
+  .dsh-ic-relay-head { font-size: 11.5px; font-weight: 600; color: var(--dsw-alias-brand-primary, #0b57d0); margin-bottom: 2px; }
+  .dsh-ic-relay-text { font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: var(--dsw-alias-label-primary, #1f2328); }
   .dsh-ic-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-secondary, #6b7280); font-size: 12.5px; padding: 16px; text-align: center; }
   .dsh-ic-composer { flex: none; display: flex; gap: 6px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); }
   .dsh-ic-composer .dsh-ic-input { margin: 0; resize: none; }
@@ -80,6 +85,7 @@ interface ConversationInfo { id: string; title: string; status: string; cwd: str
 interface DormantConversation { id: string; title: string; cwd: string; createdAt: number }
 interface GroupInfo { id: string; name: string; memberCount: number; members: string[] }
 interface MessageEntry { role: 'user' | 'assistant'; text: string; time: number; memberId?: string; memberTitle?: string }
+interface RelayEntry { id: string; fromId: string; fromTitle: string; toId: string; toTitle: string; text: string; time: number }
 interface RemoteEnvelope<T> { ok: boolean; value?: T; error?: { message: string } }
 
 interface RemoteFace {
@@ -90,7 +96,7 @@ interface RemoteFace {
   wakeSend(request: { from: string; targetId: string; text: string; delivery: string }): Promise<RemoteEnvelope<{ ok: boolean; messageId: string; applied: string; targetId: string; targetStatus: string; resumed: boolean; error: string }>>
   broadcast(request: { groupId: string; from: string; text: string; delivery: string }): Promise<RemoteEnvelope<{ ok: boolean; groupId: string; results: Array<{ targetId: string; ok: boolean; applied: string; error: string }>; error: string }>>
   readConversation(request: { sessionId: string; maxEvents: number }): Promise<RemoteEnvelope<{ ok: boolean; entries: MessageEntry[]; error: string }>>
-  readGroup(request: { groupId: string; sinceTime: number }): Promise<RemoteEnvelope<{ ok: boolean; entries: MessageEntry[]; error: string }>>
+  readGroup(request: { groupId: string; sinceTime: number }): Promise<RemoteEnvelope<{ ok: boolean; entries: MessageEntry[]; relays: RelayEntry[]; error: string }>>
   createGroup(request: { name: string; memberIds: string }): Promise<RemoteEnvelope<{ ok: boolean; groupId: string; name: string; memberCount: number; error: string }>>
   addMember(request: { groupId: string; memberId: string }): Promise<RemoteEnvelope<{ ok: boolean; error: string }>>
   removeMember(request: { groupId: string; memberId: string }): Promise<RemoteEnvelope<{ ok: boolean; error: string }>>
@@ -205,6 +211,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
   const [groupId, setGroupId] = useState('')
   const [convEntries, setConvEntries] = useState<MessageEntry[]>([])
   const [groupEntries, setGroupEntries] = useState<MessageEntry[]>([])
+  const [groupRelays, setGroupRelays] = useState<RelayEntry[]>([])
   const [text, setText] = useState('')
   const [delivery, setDelivery] = useState('wake')
   const [newGroupName, setNewGroupName] = useState('')
@@ -241,25 +248,58 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
         if (r.ok && r.value !== undefined) setConvEntries(r.value.entries)
       } else if (tab === 'group' && groupId !== '') {
         const r = await remote.readGroup({ groupId, sinceTime: 0 })
-        if (r.ok && r.value !== undefined) setGroupEntries(r.value.entries)
+        if (r.ok && r.value !== undefined) {
+          setGroupEntries(r.value.entries)
+          setGroupRelays(r.value.relays ?? [])
+        }
       }
     } catch { /* history is best-effort */ }
+  }
+
+  // Live list + groups poll fast; the dormant list (title-heavy) polls slowly.
+  const refreshLive = async (): Promise<void> => {
+    try {
+      const list = await remote.list()
+      if (list.ok && list.value !== undefined) {
+        setConversations(list.value)
+        const first = list.value[0]
+        if (convId === '' && first !== undefined) setConvId(first.id)
+      }
+      const groupList = await remote.groups()
+      if (groupList.ok && groupList.value !== undefined) {
+        setGroups(groupList.value)
+        const firstGroup = groupList.value[0]
+        if (groupId === '' && firstGroup !== undefined) setGroupId(firstGroup.id)
+      }
+    } catch { /* next tick retries */ }
+  }
+
+  const refreshDormantOnly = async (): Promise<void> => {
+    try {
+      const dormantList = await remote.dormant()
+      if (dormantList.ok && dormantList.value !== undefined) setDormant(dormantList.value.conversations)
+    } catch { /* next tick retries */ }
   }
 
   useEffect(() => {
     let disposed = false
     void refreshLists()
-    const loopLists = (): void => {
+    const loopLive = (): void => {
       if (disposed) return
-      void refreshLists().finally(() => { setTimeout(loopLists, 3000) })
+      void refreshLive().finally(() => { setTimeout(loopLive, 3000) })
+    }
+    const loopDormant = (): void => {
+      if (disposed) return
+      void refreshDormantOnly().finally(() => { setTimeout(loopDormant, 15000) })
     }
     const loopHistory = (): void => {
       if (disposed) return
       void refreshHistory().finally(() => { setTimeout(loopHistory, 2000) })
     }
-    const t1 = setTimeout(loopLists, 3000)
-    const t2 = setTimeout(loopHistory, 2000)
-    return () => { disposed = true; clearTimeout(t1); clearTimeout(t2) }
+    const t1 = setTimeout(loopLive, 3000)
+    const t2 = setTimeout(loopDormant, 15000)
+    const t3 = setTimeout(loopHistory, 2000)
+    return () => { disposed = true; clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -350,6 +390,8 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
     : (currentGroup === undefined ? (groupId === '' ? '未选择' : groupId) : currentGroup.name)
   const addCandidates = conversations.filter(c => currentGroup === undefined || !currentGroup.members.includes(c.id))
   const entries = tab === 'conv' ? convEntries : groupEntries
+  // The group tab shows the newest activity first (the relay feed above it already leads with the freshest directed traffic).
+  const displayEntries = tab === 'group' ? [...entries].reverse() : entries
 
   return h('div', { className: 'dsh-ic-panel dsh-ic-wide' },
     h('div', { className: 'dsh-ic-head' },
@@ -414,14 +456,21 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
           tab === 'conv' && currentConv === undefined && currentDormant !== undefined ? h('span', { className: 'dsh-ic-badge idle' }, '💤 休眠 · 发送即唤醒') : null,
           tab === 'conv' && convId !== '' ? h('button', { className: 'dsh-ic-btn', onClick: () => openSession(convId), title: '在界面中打开' }, '打开') : null,
         ),
+        tab === 'group' && groupId !== '' && groupRelays.length > 0 ? h('div', { className: 'dsh-ic-relays' },
+          h('div', { className: 'dsh-ic-relays-title' }, `沟通动态 (${groupRelays.length})`),
+          groupRelays.map(r => h('div', { key: r.id, className: 'dsh-ic-relay' },
+            h('div', { className: 'dsh-ic-relay-head' }, r.toId === '*' ? `📢 ${r.fromTitle} → 全体成员` : `📤 ${r.fromTitle} → ${r.toTitle}`),
+            h('div', { className: 'dsh-ic-relay-text' }, r.text),
+          )),
+        ) : null,
         (tab === 'conv' && convId === '') || (tab === 'group' && groupId === '')
           ? h('div', { className: 'dsh-ic-empty' }, '从左侧选择一个会话或群,开始查看和发送消息')
           : h('div', { className: 'dsh-ic-msgs' },
-              entries.map((m, index) => h('div', { key: `${m.time}-${index}`, className: 'dsh-ic-msg ' + m.role },
-                m.memberTitle !== undefined && m.memberTitle !== '' && m.role === 'assistant' ? h('span', { className: 'dsh-ic-msg-from' }, m.memberTitle) : null,
+              displayEntries.map((m, index) => h('div', { key: `${m.time}-${index}`, className: 'dsh-ic-msg ' + m.role },
+                m.memberTitle !== undefined && m.memberTitle !== '' ? h('span', { className: 'dsh-ic-msg-from' }, tab === 'group' && m.role === 'user' ? `${m.memberTitle} 的输入` : m.memberTitle) : null,
                 m.text,
               )),
-              entries.length === 0 ? h('div', { className: 'dsh-ic-empty' }, '暂无消息') : null,
+              displayEntries.length === 0 ? h('div', { className: 'dsh-ic-empty' }, '暂无消息') : null,
             ),
         h('div', { className: 'dsh-ic-composer' },
           h('select', { className: 'dsh-ic-input', style: { width: 108, flex: 'none', margin: 0 }, value: delivery, onChange: (e: ValueEvent) => setDelivery(e.target.value) },

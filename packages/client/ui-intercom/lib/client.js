@@ -66,6 +66,11 @@ window.__ModuleLoader__.load({
   .dsh-ic-msg.user { align-self: flex-end; background: var(--dsw-alias-brand-primary, #0b57d0); color: #fff; border-bottom-right-radius: 3px; }
   .dsh-ic-msg.assistant { align-self: flex-start; background: var(--dsw-alias-bg-layer-2, rgba(0,0,0,.05)); color: var(--dsw-alias-label-primary, #1f2328); border-bottom-left-radius: 3px; }
   .dsh-ic-msg-from { display: block; font-size: 11px; color: var(--dsw-alias-label-secondary, #6b7280); margin-bottom: 2px; }
+  .dsh-ic-relays { flex: none; max-height: 42%; overflow: auto; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .dsh-ic-relays-title { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dsw-alias-label-secondary, #6b7280); }
+  .dsh-ic-relay { border-left: 3px solid var(--dsw-alias-brand-primary, #0b57d0); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #0b57d0) 7%, transparent); border-radius: 6px; padding: 6px 8px; }
+  .dsh-ic-relay-head { font-size: 11.5px; font-weight: 600; color: var(--dsw-alias-brand-primary, #0b57d0); margin-bottom: 2px; }
+  .dsh-ic-relay-text { font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: var(--dsw-alias-label-primary, #1f2328); }
   .dsh-ic-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-secondary, #6b7280); font-size: 12.5px; padding: 16px; text-align: center; }
   .dsh-ic-composer { flex: none; display: flex; gap: 6px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08)); }
   .dsh-ic-composer .dsh-ic-input { margin: 0; resize: none; }
@@ -182,6 +187,7 @@ window.__ModuleLoader__.load({
 			const [groupId, setGroupId] = (0, react.useState)("");
 			const [convEntries, setConvEntries] = (0, react.useState)([]);
 			const [groupEntries, setGroupEntries] = (0, react.useState)([]);
+			const [groupRelays, setGroupRelays] = (0, react.useState)([]);
 			const [text, setText] = (0, react.useState)("");
 			const [delivery, setDelivery] = (0, react.useState)("wake");
 			const [newGroupName, setNewGroupName] = (0, react.useState)("");
@@ -229,17 +235,48 @@ window.__ModuleLoader__.load({
 							groupId,
 							sinceTime: 0
 						});
-						if (r.ok && r.value !== void 0) setGroupEntries(r.value.entries);
+						if (r.ok && r.value !== void 0) {
+							setGroupEntries(r.value.entries);
+							setGroupRelays(r.value.relays ?? []);
+						}
 					}
+				} catch {}
+			};
+			const refreshLive = async () => {
+				try {
+					const list = await remote.list();
+					if (list.ok && list.value !== void 0) {
+						setConversations(list.value);
+						const first = list.value[0];
+						if (convId === "" && first !== void 0) setConvId(first.id);
+					}
+					const groupList = await remote.groups();
+					if (groupList.ok && groupList.value !== void 0) {
+						setGroups(groupList.value);
+						const firstGroup = groupList.value[0];
+						if (groupId === "" && firstGroup !== void 0) setGroupId(firstGroup.id);
+					}
+				} catch {}
+			};
+			const refreshDormantOnly = async () => {
+				try {
+					const dormantList = await remote.dormant();
+					if (dormantList.ok && dormantList.value !== void 0) setDormant(dormantList.value.conversations);
 				} catch {}
 			};
 			(0, react.useEffect)(() => {
 				let disposed = false;
 				refreshLists();
-				const loopLists = () => {
+				const loopLive = () => {
 					if (disposed) return;
-					refreshLists().finally(() => {
-						setTimeout(loopLists, 3e3);
+					refreshLive().finally(() => {
+						setTimeout(loopLive, 3e3);
+					});
+				};
+				const loopDormant = () => {
+					if (disposed) return;
+					refreshDormantOnly().finally(() => {
+						setTimeout(loopDormant, 15e3);
 					});
 				};
 				const loopHistory = () => {
@@ -248,12 +285,14 @@ window.__ModuleLoader__.load({
 						setTimeout(loopHistory, 2e3);
 					});
 				};
-				const t1 = setTimeout(loopLists, 3e3);
-				const t2 = setTimeout(loopHistory, 2e3);
+				const t1 = setTimeout(loopLive, 3e3);
+				const t2 = setTimeout(loopDormant, 15e3);
+				const t3 = setTimeout(loopHistory, 2e3);
 				return () => {
 					disposed = true;
 					clearTimeout(t1);
 					clearTimeout(t2);
+					clearTimeout(t3);
 				};
 			}, []);
 			const send = async () => {
@@ -389,6 +428,7 @@ window.__ModuleLoader__.load({
 			const currentTitle = tab === "conv" ? currentConv === void 0 ? currentDormant === void 0 ? convId === "" ? "未选择" : convId : currentDormant.title : currentConv.title : currentGroup === void 0 ? groupId === "" ? "未选择" : groupId : currentGroup.name;
 			const addCandidates = conversations.filter((c) => currentGroup === void 0 || !currentGroup.members.includes(c.id));
 			const entries = tab === "conv" ? convEntries : groupEntries;
+			const displayEntries = tab === "group" ? [...entries].reverse() : entries;
 			return (0, react.createElement)("div", { className: "dsh-ic-panel dsh-ic-wide" }, (0, react.createElement)("div", { className: "dsh-ic-head" }, (0, react.createElement)("span", {
 				className: "dsh-ic-head-title",
 				dangerouslySetInnerHTML: { __html: "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244\"/></svg>Intercom 通信中心" }
@@ -506,10 +546,13 @@ window.__ModuleLoader__.load({
 				className: "dsh-ic-btn",
 				onClick: () => openSession(convId),
 				title: "在界面中打开"
-			}, "打开") : null), tab === "conv" && convId === "" || tab === "group" && groupId === "" ? (0, react.createElement)("div", { className: "dsh-ic-empty" }, "从左侧选择一个会话或群,开始查看和发送消息") : (0, react.createElement)("div", { className: "dsh-ic-msgs" }, entries.map((m, index) => (0, react.createElement)("div", {
+			}, "打开") : null), tab === "group" && groupId !== "" && groupRelays.length > 0 ? (0, react.createElement)("div", { className: "dsh-ic-relays" }, (0, react.createElement)("div", { className: "dsh-ic-relays-title" }, `沟通动态 (${groupRelays.length})`), groupRelays.map((r) => (0, react.createElement)("div", {
+				key: r.id,
+				className: "dsh-ic-relay"
+			}, (0, react.createElement)("div", { className: "dsh-ic-relay-head" }, r.toId === "*" ? `📢 ${r.fromTitle} → 全体成员` : `📤 ${r.fromTitle} → ${r.toTitle}`), (0, react.createElement)("div", { className: "dsh-ic-relay-text" }, r.text)))) : null, tab === "conv" && convId === "" || tab === "group" && groupId === "" ? (0, react.createElement)("div", { className: "dsh-ic-empty" }, "从左侧选择一个会话或群,开始查看和发送消息") : (0, react.createElement)("div", { className: "dsh-ic-msgs" }, displayEntries.map((m, index) => (0, react.createElement)("div", {
 				key: `${m.time}-${index}`,
 				className: "dsh-ic-msg " + m.role
-			}, m.memberTitle !== void 0 && m.memberTitle !== "" && m.role === "assistant" ? (0, react.createElement)("span", { className: "dsh-ic-msg-from" }, m.memberTitle) : null, m.text)), entries.length === 0 ? (0, react.createElement)("div", { className: "dsh-ic-empty" }, "暂无消息") : null), (0, react.createElement)("div", { className: "dsh-ic-composer" }, (0, react.createElement)("select", {
+			}, m.memberTitle !== void 0 && m.memberTitle !== "" ? (0, react.createElement)("span", { className: "dsh-ic-msg-from" }, tab === "group" && m.role === "user" ? `${m.memberTitle} 的输入` : m.memberTitle) : null, m.text)), displayEntries.length === 0 ? (0, react.createElement)("div", { className: "dsh-ic-empty" }, "暂无消息") : null), (0, react.createElement)("div", { className: "dsh-ic-composer" }, (0, react.createElement)("select", {
 				className: "dsh-ic-input",
 				style: {
 					width: 108,

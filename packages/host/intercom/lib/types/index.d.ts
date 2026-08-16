@@ -29,12 +29,17 @@ export declare class IntercomGateway extends TypertRemoteService {
     private counter;
     private domain;
     private titleCache;
+    /** Directed relay feed per group (live view; session logs stay the truth). */
+    private relayLog;
     private get agents();
     private get titleService();
     private get queryService();
     private get subagents();
     private get persistence();
+    private get projectionCache();
     constructor(ctx: Context);
+    /** Rendered into every agent's system prompt: how and when to use intercom. */
+    private cooperationPrompt;
     private mintId;
     private titleOf;
     private cwdOf;
@@ -50,6 +55,15 @@ export declare class IntercomGateway extends TypertRemoteService {
     private sameWorkspace;
     /** Resolve a session title with a 5-minute cache; falls back to the id. */
     private titleOfSession;
+    /** Zero-I/O title read from the in-memory projection cache; undefined on miss. */
+    private cachedTitleOf;
+    private titleOfById;
+    private recordRelay;
+    private buildRelay;
+    /** A direct send becomes a feed entry of every group containing both parties. */
+    private recordRelayForPair;
+    /** A broadcast becomes one "from → 全体成员" feed entry of that group. */
+    private recordBroadcastRelay;
     private buildMessage;
     private recordOutbox;
     private deliver;

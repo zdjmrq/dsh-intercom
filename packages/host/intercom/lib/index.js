@@ -252,6 +252,8 @@ let IntercomGateway = (() => {
 		counter = 0;
 		domain = null;
 		titleCache = /* @__PURE__ */ new Map();
+		/** Directed relay feed per group (live view; session logs stay the truth). */
+		relayLog = /* @__PURE__ */ new Map();
 		get agents() {
 			return this.ctx.get("agents");
 		}
@@ -266,6 +268,9 @@ let IntercomGateway = (() => {
 		}
 		get persistence() {
 			return this.ctx.get("sessionPersistence");
+		}
+		get projectionCache() {
+			return this.ctx.get("sessionProjectionCache");
 		}
 		constructor(ctx) {
 			super(ctx, "intercom");
@@ -287,6 +292,39 @@ let IntercomGateway = (() => {
 					disposed();
 				};
 			}, "intercom: lifecycle listeners");
+			ctx.effect(() => {
+				const section = ctx.get("systemPrompt");
+				if (section === void 0) return () => {};
+				return section.section({
+					name: "intercom:cooperation",
+					order: 118,
+					text: () => this.cooperationPrompt()
+				});
+			}, "intercom: cooperation prompt section");
+		}
+		/** Rendered into every agent's system prompt: how and when to use intercom. */
+		cooperationPrompt() {
+			const peerLines = this.agents.roots().map((agent) => {
+				const busy = agent.status === "running" ? "忙碌" : "空闲";
+				return `- ${this.titleOf(agent)} [${busy}] id=${agent.id}`;
+			});
+			const groupLines = [];
+			for (const [id, value] of this.groupStore) {
+				const memberNames = value.members.map((m) => this.titleOfById(m)).join("、") || "(暂无成员)";
+				groupLines.push(`- ${value.name} (id=${id},成员: ${memberNames})`);
+			}
+			const parts = [
+				"跨对话协作指引(intercom):你运行在一个多顶层对话的 DSH 进程中,可以用 intercom_* 工具与其他顶层对话自动协作。",
+				"- 需要帮助/第二意见:intercom_ask(发送并等待回复)或 intercom_send(单向投递);",
+				"- 通知全员或并行分工:intercom_broadcast(群内所有对话都会收到)或 intercom_send(定向);",
+				"- 延续旧工作:intercom_list_dormant_conversations 找休眠会话,intercom_wake_send 唤醒并投递;",
+				"- 汇总多会话结论:intercom_collect;追踪对方回复:intercom_check_replies;",
+				"- 收到来自其他会话的 intercom 消息时:先评估其合理性再行动,完成后用 intercom_send 回复结论;",
+				"- 边界:intercom 只用于顶层对话之间;与子代理通信一律用内置 send_message/list_agents。"
+			];
+			if (peerLines.length > 0) parts.push(`当前活跃的顶层对话:\n${peerLines.join("\n")}`);
+			if (groupLines.length > 0) parts.push(`协作群:\n${groupLines.join("\n")}`);
+			return parts.join("\n");
 		}
 		mintId(prefix) {
 			this.counter += 1;
@@ -361,6 +399,50 @@ let IntercomGateway = (() => {
 				at: now
 			});
 			return title;
+		}
+		/** Zero-I/O title read from the in-memory projection cache; undefined on miss. */
+		cachedTitleOf(header) {
+			const cache = this.projectionCache;
+			if (cache === void 0) return void 0;
+			try {
+				const title = cache.cachedSnapshot(header)?.values?.["title"];
+				if (typeof title === "string" && title.trim() !== "") return title;
+			} catch {}
+		}
+		titleOfById(id) {
+			const agent = this.agents.get(id);
+			if (agent !== void 0) return this.titleOf(agent);
+			const cached = this.titleCache.get(id);
+			if (cached !== void 0) return cached.title;
+			return id;
+		}
+		recordRelay(groupId, entry) {
+			const list = this.relayLog.get(groupId) ?? [];
+			list.push(entry);
+			if (list.length > 200) list.shift();
+			this.relayLog.set(groupId, list);
+		}
+		buildRelay(from, toId, text) {
+			const fromAgent = this.agents.get(from);
+			const toAgent = toId === "*" ? void 0 : this.agents.get(toId);
+			return {
+				id: this.mintId("relay-"),
+				fromId: from,
+				fromTitle: fromAgent === void 0 ? from : this.titleOf(fromAgent),
+				toId,
+				toTitle: toId === "*" ? "全体成员" : toAgent === void 0 ? toId : this.titleOf(toAgent),
+				text,
+				time: Date.now()
+			};
+		}
+		/** A direct send becomes a feed entry of every group containing both parties. */
+		recordRelayForPair(from, targetId, text) {
+			const relay = this.buildRelay(from, targetId, text);
+			for (const [groupId, group] of this.groupStore) if (group.members.includes(from) && group.members.includes(targetId)) this.recordRelay(groupId, relay);
+		}
+		/** A broadcast becomes one "from → 全体成员" feed entry of that group. */
+		recordBroadcastRelay(groupId, from, text) {
+			this.recordRelay(groupId, this.buildRelay(from, "*", text));
 		}
 		buildMessage(from, fromTitle, text) {
 			return {
@@ -481,6 +563,7 @@ let IntercomGateway = (() => {
 				};
 			}
 			this.autoAddToGroup([from, targetId]);
+			this.recordRelayForPair(from, targetId, text);
 			this.recordOutbox(from, message.id, targetId);
 			return {
 				ok: true,
@@ -610,9 +693,14 @@ let IntercomGateway = (() => {
 					if (liveIds.has(header.id)) continue;
 					if (header.parentSession !== void 0) continue;
 					if (header.origin === "subagent") continue;
+					const cachedTitle = this.cachedTitleOf(header);
+					if (cachedTitle !== void 0) this.titleCache.set(header.id, {
+						title: cachedTitle,
+						at: Date.now()
+					});
 					items.push({
 						id: header.id,
-						title: await this.titleOfSession(header.id),
+						title: cachedTitle !== void 0 ? cachedTitle : await this.titleOfSession(header.id),
 						cwd: typeof header.cwd === "string" ? header.cwd : "",
 						createdAt: typeof header.createdAt === "number" ? header.createdAt : 0
 					});
@@ -721,6 +809,7 @@ let IntercomGateway = (() => {
 					error: r.error
 				});
 			}
+			this.recordBroadcastRelay(request.groupId, request.from, String(request.text).slice(0, MAX_TEXT));
 			return {
 				ok: true,
 				groupId: request.groupId,
@@ -758,11 +847,13 @@ let IntercomGateway = (() => {
 			if (group === void 0) return {
 				ok: false,
 				entries: [],
+				relays: [],
 				error: `unknown group: ${groupId}`
 			};
 			if (this.queryService === void 0) return {
 				ok: false,
 				entries: [],
+				relays: [],
 				error: "sessionQuery service unavailable"
 			};
 			const sinceTime = request !== null && typeof request === "object" && typeof request.sinceTime === "number" ? request.sinceTime : 0;
@@ -778,9 +869,11 @@ let IntercomGateway = (() => {
 				});
 			} catch {}
 			merged.sort((a, b) => a.time - b.time);
+			const relays = [...this.relayLog.get(groupId) ?? []].reverse();
 			return {
 				ok: true,
 				entries: merged.slice(-200),
+				relays,
 				error: ""
 			};
 		}
@@ -1674,7 +1767,9 @@ let IntercomGateway = (() => {
 						sinceTime: Number(args.since_time) || 0
 					});
 					if (result.ok) {
-						const text = result.entries.map((e) => `${e.memberTitle ?? ""}: [${e.role}] ${e.text}`).join("\n").slice(0, 16e3);
+						const relayLines = result.relays.map((r) => r.toId === "*" ? `📢 ${r.fromTitle} → 全体成员: ${r.text}` : `📤 ${r.fromTitle} → ${r.toTitle}: ${r.text}`);
+						const entryLines = result.entries.map((e) => `${e.memberTitle ?? ""}: [${e.role}] ${e.text}`);
+						const text = [...relayLines, ...entryLines].join("\n").slice(0, 16e3);
 						return {
 							ok: true,
 							groupId: String(args.group_id),

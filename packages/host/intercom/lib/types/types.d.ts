@@ -85,9 +85,26 @@ export type ReadGroupRequest = {
     groupId: string;
     sinceTime: number;
 };
+/**
+ * One directed relay record shown in the group feed: "A → B" for a direct
+ * send, or "A → 全体" (toId `*`) for a group-wide broadcast. Live view only —
+ * the authoritative history stays in the member session logs.
+ */
+export type RelayEntry = {
+    id: string;
+    fromId: string;
+    fromTitle: string;
+    /** Target member id, or `*` for a broadcast to every member. */
+    toId: string;
+    toTitle: string;
+    text: string;
+    time: number;
+};
 export type ReadGroupResult = {
     ok: boolean;
     entries: MessageEntry[];
+    /** Directed relay feed, newest first. */
+    relays: RelayEntry[];
     error: string;
 };
 export type CreateGroupRequest = {

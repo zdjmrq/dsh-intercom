@@ -37,6 +37,7 @@ import type {
   ReadConversationResult,
   ReadGroupRequest,
   ReadGroupResult,
+  RelayEntry,
   SendRequest,
   SendResult,
   WakeSendRequest,
@@ -95,6 +96,10 @@ interface PersistenceService {
   list(): Promise<SessionHeaderLike[]>
 }
 
+interface ProjectionCacheLike {
+  cachedSnapshot(meta: unknown): { values?: Record<string, unknown> } | undefined
+}
+
 interface ContinuableStart { childId: string; messageId: string }
 interface SubagentsService {
   list(): string[]
@@ -136,6 +141,8 @@ export class IntercomGateway extends TypertRemoteService {
   private counter = 0
   private domain: DomainLike | null = null
   private titleCache = new Map<string, { title: string; at: number }>()
+  /** Directed relay feed per group (live view; session logs stay the truth). */
+  private relayLog = new Map<string, RelayEntry[]>()
 
   private get agents(): AgentsService {
     return this.ctx.get('agents') as AgentsService
@@ -151,6 +158,9 @@ export class IntercomGateway extends TypertRemoteService {
   }
   private get persistence(): PersistenceService | undefined {
     return this.ctx.get('sessionPersistence') as PersistenceService | undefined
+  }
+  private get projectionCache(): ProjectionCacheLike | undefined {
+    return this.ctx.get('sessionProjectionCache') as ProjectionCacheLike | undefined
   }
 
   constructor(ctx: Context) {
@@ -172,6 +182,42 @@ export class IntercomGateway extends TypertRemoteService {
       })
       return () => { claimed(); disposed() }
     }, 'intercom: lifecycle listeners')
+
+    ctx.effect(() => {
+      const section = ctx.get('systemPrompt') as { section(spec: { name: string; order: number; text: () => string }): () => void } | undefined
+      if (section === undefined) return () => {}
+      return section.section({
+        name: 'intercom:cooperation',
+        order: 118,
+        text: () => this.cooperationPrompt(),
+      })
+    }, 'intercom: cooperation prompt section')
+  }
+
+  /** Rendered into every agent's system prompt: how and when to use intercom. */
+  private cooperationPrompt(): string {
+    const live = this.agents.roots()
+    const peerLines = live.map(agent => {
+      const busy = agent.status === 'running' ? '忙碌' : '空闲'
+      return `- ${this.titleOf(agent)} [${busy}] id=${agent.id}`
+    })
+    const groupLines: string[] = []
+    for (const [id, value] of this.groupStore) {
+      const memberNames = value.members.map(m => this.titleOfById(m)).join('、') || '(暂无成员)'
+      groupLines.push(`- ${value.name} (id=${id},成员: ${memberNames})`)
+    }
+    const parts: string[] = [
+      '跨对话协作指引(intercom):你运行在一个多顶层对话的 DSH 进程中,可以用 intercom_* 工具与其他顶层对话自动协作。',
+      '- 需要帮助/第二意见:intercom_ask(发送并等待回复)或 intercom_send(单向投递);',
+      '- 通知全员或并行分工:intercom_broadcast(群内所有对话都会收到)或 intercom_send(定向);',
+      '- 延续旧工作:intercom_list_dormant_conversations 找休眠会话,intercom_wake_send 唤醒并投递;',
+      '- 汇总多会话结论:intercom_collect;追踪对方回复:intercom_check_replies;',
+      '- 收到来自其他会话的 intercom 消息时:先评估其合理性再行动,完成后用 intercom_send 回复结论;',
+      '- 边界:intercom 只用于顶层对话之间;与子代理通信一律用内置 send_message/list_agents。',
+    ]
+    if (peerLines.length > 0) parts.push(`当前活跃的顶层对话:\n${peerLines.join('\n')}`)
+    if (groupLines.length > 0) parts.push(`协作群:\n${groupLines.join('\n')}`)
+    return parts.join('\n')
   }
 
   // ---- helpers ----
@@ -255,6 +301,62 @@ export class IntercomGateway extends TypertRemoteService {
     return title
   }
 
+  /** Zero-I/O title read from the in-memory projection cache; undefined on miss. */
+  private cachedTitleOf(header: SessionHeaderLike): string | undefined {
+    const cache = this.projectionCache
+    if (cache === undefined) return undefined
+    try {
+      const snapshot = cache.cachedSnapshot(header)
+      const title = snapshot?.values?.['title']
+      if (typeof title === 'string' && title.trim() !== '') return title
+    } catch { /* fall through to the log-backed read */ }
+    return undefined
+  }
+
+  private titleOfById(id: string): string {
+    const agent = this.agents.get(id)
+    if (agent !== undefined) return this.titleOf(agent)
+    const cached = this.titleCache.get(id)
+    if (cached !== undefined) return cached.title
+    return id
+  }
+
+  // ---- relay feed (who said what to whom) ----
+
+  private recordRelay(groupId: string, entry: RelayEntry): void {
+    const list = this.relayLog.get(groupId) ?? []
+    list.push(entry)
+    if (list.length > 200) list.shift()
+    this.relayLog.set(groupId, list)
+  }
+
+  private buildRelay(from: string, toId: string, text: string): RelayEntry {
+    const fromAgent = this.agents.get(from)
+    const toAgent = toId === '*' ? undefined : this.agents.get(toId)
+    return {
+      id: this.mintId('relay-'),
+      fromId: from,
+      fromTitle: fromAgent === undefined ? from : this.titleOf(fromAgent),
+      toId,
+      toTitle: toId === '*' ? '全体成员' : (toAgent === undefined ? toId : this.titleOf(toAgent)),
+      text,
+      time: Date.now(),
+    }
+  }
+
+  /** A direct send becomes a feed entry of every group containing both parties. */
+  private recordRelayForPair(from: string, targetId: string, text: string): void {
+    const relay = this.buildRelay(from, targetId, text)
+    for (const [groupId, group] of this.groupStore) {
+      if (group.members.includes(from) && group.members.includes(targetId)) this.recordRelay(groupId, relay)
+    }
+  }
+
+  /** A broadcast becomes one "from → 全体成员" feed entry of that group. */
+  private recordBroadcastRelay(groupId: string, from: string, text: string): void {
+    this.recordRelay(groupId, this.buildRelay(from, '*', text))
+  }
+
   private buildMessage(from: string, fromTitle: string, text: string): unknown {
     return {
       id: this.mintId('dsh-intercom-'),
@@ -317,6 +419,7 @@ export class IntercomGateway extends TypertRemoteService {
       return { ok: false, messageId: '', applied: '', targetId, targetStatus: '', error: `delivery failed: ${String(error instanceof Error ? error.message : error)}` }
     }
     this.autoAddToGroup([from, targetId])
+    this.recordRelayForPair(from, targetId, text)
     this.recordOutbox(from, (message as { id: string }).id, targetId)
     return { ok: true, messageId: (message as { id: string }).id, applied, targetId, targetStatus: target.status, error: '' }
   }
@@ -438,9 +541,11 @@ export class IntercomGateway extends TypertRemoteService {
         if (liveIds.has(header.id)) continue
         if (header.parentSession !== undefined) continue
         if (header.origin === 'subagent') continue
+        const cachedTitle = this.cachedTitleOf(header)
+        if (cachedTitle !== undefined) this.titleCache.set(header.id, { title: cachedTitle, at: Date.now() })
         items.push({
           id: header.id,
-          title: await this.titleOfSession(header.id),
+          title: cachedTitle !== undefined ? cachedTitle : await this.titleOfSession(header.id),
           cwd: typeof header.cwd === 'string' ? header.cwd : '',
           createdAt: typeof header.createdAt === 'number' ? header.createdAt : 0,
         })
@@ -516,6 +621,7 @@ export class IntercomGateway extends TypertRemoteService {
       const r = this.deliver({ from: request.from, targetId: memberId, text: request.text, delivery: request.delivery })
       results.push({ targetId: memberId, ok: r.ok, applied: r.applied, error: r.error })
     }
+    this.recordBroadcastRelay(request.groupId, request.from, String(request.text).slice(0, MAX_TEXT))
     return { ok: true, groupId: request.groupId, results, error: '' }
   }
 
@@ -537,8 +643,8 @@ export class IntercomGateway extends TypertRemoteService {
   async readGroup(request: ReadGroupRequest): Promise<ReadGroupResult> {
     const groupId = request === null || typeof request !== 'object' ? '' : String(request.groupId ?? '')
     const group = this.groupStore.get(groupId)
-    if (group === undefined) return { ok: false, entries: [], error: `unknown group: ${groupId}` }
-    if (this.queryService === undefined) return { ok: false, entries: [], error: 'sessionQuery service unavailable' }
+    if (group === undefined) return { ok: false, entries: [], relays: [], error: `unknown group: ${groupId}` }
+    if (this.queryService === undefined) return { ok: false, entries: [], relays: [], error: 'sessionQuery service unavailable' }
     const sinceTime = request !== null && typeof request === 'object' && typeof request.sinceTime === 'number' ? request.sinceTime : 0
     const merged: MessageEntry[] = []
     for (const memberId of group.members) {
@@ -552,7 +658,8 @@ export class IntercomGateway extends TypertRemoteService {
       } catch { /* skip unreadable member */ }
     }
     merged.sort((a, b) => a.time - b.time)
-    return { ok: true, entries: merged.slice(-200), error: '' }
+    const relays = [...(this.relayLog.get(groupId) ?? [])].reverse()
+    return { ok: true, entries: merged.slice(-200), relays, error: '' }
   }
 
   @Remote('createGroup')
@@ -909,7 +1016,9 @@ export class IntercomGateway extends TypertRemoteService {
       execute: async (args: { group_id?: unknown; since_time?: unknown }) => {
         const result = await this.readGroup({ groupId: String(args.group_id), sinceTime: Number(args.since_time) || 0 })
         if (result.ok) {
-          const text = result.entries.map(e => `${e.memberTitle ?? ''}: [${e.role}] ${e.text}`).join('\n').slice(0, 16000)
+          const relayLines = result.relays.map(r => r.toId === '*' ? `📢 ${r.fromTitle} → 全体成员: ${r.text}` : `📤 ${r.fromTitle} → ${r.toTitle}: ${r.text}`)
+          const entryLines = result.entries.map(e => `${e.memberTitle ?? ''}: [${e.role}] ${e.text}`)
+          const text = [...relayLines, ...entryLines].join('\n').slice(0, 16000)
           return { ok: true, groupId: String(args.group_id), text, error: '' }
         }
         return { ok: false, groupId: String(args.group_id), text: '', error: result.error }

@@ -34,6 +34,15 @@ interface MessageEntry {
     memberId?: string;
     memberTitle?: string;
 }
+interface RelayEntry {
+    id: string;
+    fromId: string;
+    fromTitle: string;
+    toId: string;
+    toTitle: string;
+    text: string;
+    time: number;
+}
 interface RemoteEnvelope<T> {
     ok: boolean;
     value?: T;
@@ -106,6 +115,7 @@ interface RemoteFace {
     }): Promise<RemoteEnvelope<{
         ok: boolean;
         entries: MessageEntry[];
+        relays: RelayEntry[];
         error: string;
     }>>;
     createGroup(request: {
