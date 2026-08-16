@@ -15,6 +15,12 @@ interface ConversationInfo {
     provider: string;
     model: string;
 }
+interface DormantConversation {
+    id: string;
+    title: string;
+    cwd: string;
+    createdAt: number;
+}
 interface GroupInfo {
     id: string;
     name: string;
@@ -37,6 +43,11 @@ interface RemoteEnvelope<T> {
 }
 interface RemoteFace {
     list(): Promise<RemoteEnvelope<ConversationInfo[]>>;
+    dormant(): Promise<RemoteEnvelope<{
+        ok: boolean;
+        conversations: DormantConversation[];
+        error: string;
+    }>>;
     groups(): Promise<RemoteEnvelope<GroupInfo[]>>;
     send(request: {
         from: string;
@@ -49,6 +60,20 @@ interface RemoteFace {
         applied: string;
         targetId: string;
         targetStatus: string;
+        error: string;
+    }>>;
+    wakeSend(request: {
+        from: string;
+        targetId: string;
+        text: string;
+        delivery: string;
+    }): Promise<RemoteEnvelope<{
+        ok: boolean;
+        messageId: string;
+        applied: string;
+        targetId: string;
+        targetStatus: string;
+        resumed: boolean;
         error: string;
     }>>;
     broadcast(request: {

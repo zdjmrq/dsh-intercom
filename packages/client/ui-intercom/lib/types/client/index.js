@@ -18,6 +18,8 @@ const STYLES = `
   .dsh-ic-badge { flex: none; padding: 1px 8px; border-radius: 10px; font-size: 11px; line-height: 16px; }
   .dsh-ic-badge.idle { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #1a7f37) 14%, transparent); color: var(--dsw-alias-state-success-primary, #1a7f37); }
   .dsh-ic-badge.running { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #9a6700) 16%, transparent); color: var(--dsw-alias-state-warn-primary, #9a6700); }
+  .dsh-ic-item.dormant { opacity: .55; }
+  .dsh-ic-item.dormant:hover { opacity: .85; }
   .dsh-ic-cwd { display: block; color: var(--dsw-alias-label-secondary, #6b7280); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dsh-ic-btn { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.14)); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary, #1f2328); font-size: 12.5px; cursor: pointer; }
   .dsh-ic-btn:hover { background: var(--dsw-alias-bg-layer-2, rgba(0,0,0,.05)); }
@@ -134,6 +136,7 @@ const IntercomPanel = (props) => {
     const { store, remote, sessions, workspaces, notify } = props;
     const [tab, setTab] = useState('conv');
     const [conversations, setConversations] = useState([]);
+    const [dormant, setDormant] = useState([]);
     const [groups, setGroups] = useState([]);
     const [convId, setConvId] = useState('');
     const [groupId, setGroupId] = useState('');
@@ -154,6 +157,9 @@ const IntercomPanel = (props) => {
                 if (convId === '' && first !== undefined)
                     setConvId(first.id);
             }
+            const dormantList = await remote.dormant();
+            if (dormantList.ok && dormantList.value !== undefined)
+                setDormant(dormantList.value.conversations);
             const groupList = await remote.groups();
             if (groupList.ok && groupList.value !== undefined) {
                 setGroups(groupList.value);
@@ -214,11 +220,23 @@ const IntercomPanel = (props) => {
                     say('请先选择一个会话');
                     return;
                 }
-                const r = await remote.send({ from: store.currentSessionId, targetId: convId, text, delivery });
-                if (r.ok && r.value !== undefined && r.value.ok)
-                    say(`已发送 (${r.value.applied})`, 'ok');
-                else
-                    say(`发送失败: ${r.value?.error ?? r.error?.message ?? 'unknown'}`, 'err');
+                const isDormant = dormant.some(d => d.id === convId);
+                if (isDormant) {
+                    const r = await remote.wakeSend({ from: store.currentSessionId, targetId: convId, text, delivery });
+                    if (r.ok && r.value !== undefined && r.value.ok) {
+                        say(`已唤醒并发送 (${r.value.applied})`, 'ok');
+                        void refreshLists();
+                    }
+                    else
+                        say(`唤醒发送失败: ${r.value?.error ?? r.error?.message ?? 'unknown'}`, 'err');
+                }
+                else {
+                    const r = await remote.send({ from: store.currentSessionId, targetId: convId, text, delivery });
+                    if (r.ok && r.value !== undefined && r.value.ok)
+                        say(`已发送 (${r.value.applied})`, 'ok');
+                    else
+                        say(`发送失败: ${r.value?.error ?? r.error?.message ?? 'unknown'}`, 'err');
+                }
             }
             else {
                 if (groupId === '') {
@@ -312,17 +330,18 @@ const IntercomPanel = (props) => {
         }
     };
     const currentConv = conversations.find(c => c.id === convId);
+    const currentDormant = dormant.find(d => d.id === convId);
     const currentGroup = groups.find(g => g.id === groupId);
     const currentTitle = tab === 'conv'
-        ? (currentConv === undefined ? (convId === '' ? '未选择' : convId) : currentConv.title)
+        ? (currentConv === undefined ? (currentDormant === undefined ? (convId === '' ? '未选择' : convId) : currentDormant.title) : currentConv.title)
         : (currentGroup === undefined ? (groupId === '' ? '未选择' : groupId) : currentGroup.name);
     const addCandidates = conversations.filter(c => currentGroup === undefined || !currentGroup.members.includes(c.id));
     const entries = tab === 'conv' ? convEntries : groupEntries;
     return h('div', { className: 'dsh-ic-panel dsh-ic-wide' }, h('div', { className: 'dsh-ic-head' }, h('span', { className: 'dsh-ic-head-title', dangerouslySetInnerHTML: { __html: ICON + 'Intercom 通信中心' } }), h('button', { className: 'dsh-ic-btn', onClick: startNew, title: '新建会话' }, '＋ 新会话'), h('button', { className: 'dsh-ic-btn', onClick: () => { void forkCurrent(); }, disabled: store.currentSessionId === '', title: 'Fork 当前会话' }, 'Fork'), h('button', { className: 'dsh-ic-iconbtn', title: '关闭', onClick: () => { store.open = false; notify(); }, dangerouslySetInnerHTML: { __html: CLOSE_ICON } })), h('div', { className: 'dsh-ic-body' }, h('div', { className: 'dsh-ic-side' }, h('div', { className: 'dsh-ic-tabs' }, h('button', { className: 'dsh-ic-tab' + (tab === 'conv' ? ' active' : ''), onClick: () => setTab('conv') }, '会话'), h('button', { className: 'dsh-ic-tab' + (tab === 'group' ? ' active' : ''), onClick: () => setTab('group') }, '群聊')), tab === 'conv'
-        ? h('div', { className: 'dsh-ic-list' }, conversations.map(c => h('div', { key: c.id, className: 'dsh-ic-item' + (c.id === convId ? ' active' : ''), onClick: () => { setConvId(c.id); setTab('conv'); } }, h('div', { className: 'dsh-ic-item-head' }, h('span', { className: 'dsh-ic-item-title', title: c.id }, c.title), h('span', { className: 'dsh-ic-badge ' + (c.status === 'running' ? 'running' : 'idle') }, c.status === 'running' ? '忙碌' : '空闲')), h('span', { className: 'dsh-ic-cwd', title: c.cwd }, `📁 ${c.cwd || ''}`))))
-        : h('div', { className: 'dsh-ic-list' }, groups.map(g => h('div', { key: g.id, className: 'dsh-ic-item' + (g.id === groupId ? ' active' : ''), onClick: () => setGroupId(g.id) }, h('div', { className: 'dsh-ic-item-head' }, h('span', { className: 'dsh-ic-item-title', title: g.id }, g.name), h('span', { className: 'dsh-ic-badge idle' }, `${g.memberCount} 人`)))), h('div', { style: { marginTop: 8, padding: '0 4px' } }, h('input', { className: 'dsh-ic-input', style: { margin: 0 }, value: newGroupName, onChange: (e) => setNewGroupName(e.target.value), placeholder: '新群名称(含当前会话)…' }), h('button', { className: 'dsh-ic-btn dsh-ic-btn-primary', onClick: () => { void createGroup(); }, style: { marginTop: 6 } }, '＋ 新建群')), currentGroup !== undefined ? h('div', { style: { marginTop: 10, padding: '0 4px' } }, h('div', { className: 'dsh-ic-sec-title' }, '成员'), currentGroup.members.map(m => h('div', { key: m, className: 'dsh-ic-member-row' }, h('span', { className: 'dsh-ic-member-name', title: m }, m === store.currentSessionId ? '● ' : '', m), h('button', { className: 'dsh-ic-iconbtn', title: '移除', onClick: () => { void removeMember(m); }, dangerouslySetInnerHTML: { __html: CLOSE_ICON } }))), h('select', { className: 'dsh-ic-input', style: { marginTop: 6 }, value: addMemberId, onChange: (e) => setAddMemberId(e.target.value) }, h('option', { value: '' }, '＋ 添加会话…'), addCandidates.map(c => h('option', { key: c.id, value: c.id }, c.title))), h('button', { className: 'dsh-ic-btn', onClick: () => { void addMember(); }, disabled: addMemberId === '', style: { marginTop: 4 } }, '添加')) : null)), h('div', { className: 'dsh-ic-main' }, h('div', { className: 'dsh-ic-chat-head' }, h('span', { className: 'dsh-ic-chat-title', title: currentTitle }, currentTitle), tab === 'conv' && currentConv !== undefined ? h('span', { className: 'dsh-ic-badge ' + (currentConv.status === 'running' ? 'running' : 'idle') }, currentConv.status === 'running' ? '忙碌' : '空闲') : null, tab === 'conv' && convId !== '' ? h('button', { className: 'dsh-ic-btn', onClick: () => openSession(convId), title: '在界面中打开' }, '打开') : null), (tab === 'conv' && convId === '') || (tab === 'group' && groupId === '')
+        ? h('div', { className: 'dsh-ic-list' }, conversations.map(c => h('div', { key: c.id, className: 'dsh-ic-item' + (c.id === convId ? ' active' : ''), onClick: () => { setConvId(c.id); setTab('conv'); } }, h('div', { className: 'dsh-ic-item-head' }, h('span', { className: 'dsh-ic-item-title', title: c.id }, c.title), h('span', { className: 'dsh-ic-badge ' + (c.status === 'running' ? 'running' : 'idle') }, c.status === 'running' ? '忙碌' : '空闲')), h('span', { className: 'dsh-ic-cwd', title: c.cwd }, `📁 ${c.cwd || ''}`))), dormant.length > 0 ? h('div', { className: 'dsh-ic-sec-title', style: { margin: '10px 4px 4px' } }, `休眠会话 (${dormant.length}) · 发送即唤醒`) : null, dormant.map(d => h('div', { key: d.id, className: 'dsh-ic-item dormant' + (d.id === convId ? ' active' : ''), onClick: () => { setConvId(d.id); setTab('conv'); } }, h('div', { className: 'dsh-ic-item-head' }, h('span', { className: 'dsh-ic-item-title', title: d.id }, d.title), h('span', { className: 'dsh-ic-badge idle' }, '💤 休眠')), h('span', { className: 'dsh-ic-cwd', title: d.cwd }, `📁 ${d.cwd || ''}`))))
+        : h('div', { className: 'dsh-ic-list' }, groups.map(g => h('div', { key: g.id, className: 'dsh-ic-item' + (g.id === groupId ? ' active' : ''), onClick: () => setGroupId(g.id) }, h('div', { className: 'dsh-ic-item-head' }, h('span', { className: 'dsh-ic-item-title', title: g.id }, g.name), h('span', { className: 'dsh-ic-badge idle' }, `${g.memberCount} 人`)))), h('div', { style: { marginTop: 8, padding: '0 4px' } }, h('input', { className: 'dsh-ic-input', style: { margin: 0 }, value: newGroupName, onChange: (e) => setNewGroupName(e.target.value), placeholder: '新群名称(含当前会话)…' }), h('button', { className: 'dsh-ic-btn dsh-ic-btn-primary', onClick: () => { void createGroup(); }, style: { marginTop: 6 } }, '＋ 新建群')), currentGroup !== undefined ? h('div', { style: { marginTop: 10, padding: '0 4px' } }, h('div', { className: 'dsh-ic-sec-title' }, '成员'), currentGroup.members.map(m => h('div', { key: m, className: 'dsh-ic-member-row' }, h('span', { className: 'dsh-ic-member-name', title: m }, m === store.currentSessionId ? '● ' : '', m), h('button', { className: 'dsh-ic-iconbtn', title: '移除', onClick: () => { void removeMember(m); }, dangerouslySetInnerHTML: { __html: CLOSE_ICON } }))), h('select', { className: 'dsh-ic-input', style: { marginTop: 6 }, value: addMemberId, onChange: (e) => setAddMemberId(e.target.value) }, h('option', { value: '' }, '＋ 添加会话…'), addCandidates.map(c => h('option', { key: c.id, value: c.id }, c.title))), h('button', { className: 'dsh-ic-btn', onClick: () => { void addMember(); }, disabled: addMemberId === '', style: { marginTop: 4 } }, '添加')) : null)), h('div', { className: 'dsh-ic-main' }, h('div', { className: 'dsh-ic-chat-head' }, h('span', { className: 'dsh-ic-chat-title', title: currentTitle }, currentTitle), tab === 'conv' && currentConv !== undefined ? h('span', { className: 'dsh-ic-badge ' + (currentConv.status === 'running' ? 'running' : 'idle') }, currentConv.status === 'running' ? '忙碌' : '空闲') : null, tab === 'conv' && currentConv === undefined && currentDormant !== undefined ? h('span', { className: 'dsh-ic-badge idle' }, '💤 休眠 · 发送即唤醒') : null, tab === 'conv' && convId !== '' ? h('button', { className: 'dsh-ic-btn', onClick: () => openSession(convId), title: '在界面中打开' }, '打开') : null), (tab === 'conv' && convId === '') || (tab === 'group' && groupId === '')
         ? h('div', { className: 'dsh-ic-empty' }, '从左侧选择一个会话或群,开始查看和发送消息')
-        : h('div', { className: 'dsh-ic-msgs' }, entries.map((m, index) => h('div', { key: `${m.time}-${index}`, className: 'dsh-ic-msg ' + m.role }, m.memberTitle !== undefined && m.memberTitle !== '' && m.role === 'assistant' ? h('span', { className: 'dsh-ic-msg-from' }, m.memberTitle) : null, m.text)), entries.length === 0 ? h('div', { className: 'dsh-ic-empty' }, '暂无消息') : null), h('div', { className: 'dsh-ic-composer' }, h('select', { className: 'dsh-ic-input', style: { width: 108, flex: 'none', margin: 0 }, value: delivery, onChange: (e) => setDelivery(e.target.value) }, h('option', { value: 'wake' }, '唤醒'), h('option', { value: 'steer' }, '介入')), h('textarea', { className: 'dsh-ic-input', style: { flex: 1, margin: 0, minHeight: 34, maxHeight: 90 }, rows: 1, value: text, onChange: (e) => setText(e.target.value), placeholder: tab === 'conv' ? '发消息给该会话…' : '广播给群成员…' }), h('button', { className: 'dsh-ic-btn dsh-ic-btn-primary', style: { flex: 'none' }, onClick: () => { void send(); } }, '发送')), h('div', { className: 'dsh-ic-feedback' + (feedback.tone === 'err' ? ' err' : feedback.tone === 'ok' ? ' ok' : ''), style: { flex: 'none', padding: '2px 12px 8px' } }, feedback.text))));
+        : h('div', { className: 'dsh-ic-msgs' }, entries.map((m, index) => h('div', { key: `${m.time}-${index}`, className: 'dsh-ic-msg ' + m.role }, m.memberTitle !== undefined && m.memberTitle !== '' && m.role === 'assistant' ? h('span', { className: 'dsh-ic-msg-from' }, m.memberTitle) : null, m.text)), entries.length === 0 ? h('div', { className: 'dsh-ic-empty' }, '暂无消息') : null), h('div', { className: 'dsh-ic-composer' }, h('select', { className: 'dsh-ic-input', style: { width: 108, flex: 'none', margin: 0 }, value: delivery, onChange: (e) => setDelivery(e.target.value) }, h('option', { value: 'wake' }, '唤醒'), h('option', { value: 'steer' }, '介入')), h('textarea', { className: 'dsh-ic-input', style: { flex: 1, margin: 0, minHeight: 34, maxHeight: 90 }, rows: 1, value: text, onChange: (e) => setText(e.target.value), placeholder: tab === 'conv' ? (currentConv === undefined && currentDormant !== undefined ? '该会话休眠中,发送将唤醒它…' : '发消息给该会话…') : '广播给群成员…' }), h('button', { className: 'dsh-ic-btn dsh-ic-btn-primary', style: { flex: 'none' }, onClick: () => { void send(); } }, tab === 'conv' && currentConv === undefined && currentDormant !== undefined ? '唤醒并发送' : '发送')), h('div', { className: 'dsh-ic-feedback' + (feedback.tone === 'err' ? ' err' : feedback.tone === 'ok' ? ' ok' : ''), style: { flex: 'none', padding: '2px 12px 8px' } }, feedback.text))));
 };
 export { IntercomPanel };
 //# sourceMappingURL=index.js.map

@@ -3,45 +3,34 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type {
-  BroadcastRequest,
-  BroadcastResult,
-  ConversationInfo,
-  CreateGroupRequest,
-  CreateGroupResult,
-  GroupInfo,
-  GroupMemberRequest,
-  OkResult,
-  ReadConversationRequest,
-  ReadConversationResult,
-  ReadGroupRequest,
-  ReadGroupResult,
-  SendRequest,
-  SendResult,
-} from '@deepseek-ai/dsh-host-intercom/types'
+import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRequest, CreateGroupResult, DormantListResult, GroupInfo, GroupMemberRequest, OkResult, ReadConversationRequest, ReadConversationResult, ReadGroupRequest, ReadGroupResult, SendRequest, SendResult, WakeSendRequest, WakeSendResult } from '@deepseek-ai/dsh-host-intercom/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$696e746572636f6d {
-    list: () => Promise<RemoteResult<ConversationInfo[]>>
-    groups: () => Promise<RemoteResult<GroupInfo[]>>
-    send: (request: SendRequest) => Promise<RemoteResult<SendResult>>
+    addMember: (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
     broadcast: (request: BroadcastRequest) => Promise<RemoteResult<BroadcastResult>>
+    createGroup: (request: CreateGroupRequest) => Promise<RemoteResult<CreateGroupResult>>
+    dormant: () => Promise<RemoteResult<DormantListResult>>
+    groups: () => Promise<RemoteResult<GroupInfo[]>>
+    list: () => Promise<RemoteResult<ConversationInfo[]>>
     readConversation: (request: ReadConversationRequest) => Promise<RemoteResult<ReadConversationResult>>
     readGroup: (request: ReadGroupRequest) => Promise<RemoteResult<ReadGroupResult>>
-    createGroup: (request: CreateGroupRequest) => Promise<RemoteResult<CreateGroupResult>>
-    addMember: (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
     removeMember: (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
+    send: (request: SendRequest) => Promise<RemoteResult<SendResult>>
+    wakeSend: (request: WakeSendRequest) => Promise<RemoteResult<WakeSendResult>>
   }
   interface TypertRemoteMap {
-    'intercom/list': () => Promise<RemoteResult<ConversationInfo[]>>
-    'intercom/groups': () => Promise<RemoteResult<GroupInfo[]>>
-    'intercom/send': (request: SendRequest) => Promise<RemoteResult<SendResult>>
+    'intercom/addMember': (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
     'intercom/broadcast': (request: BroadcastRequest) => Promise<RemoteResult<BroadcastResult>>
+    'intercom/createGroup': (request: CreateGroupRequest) => Promise<RemoteResult<CreateGroupResult>>
+    'intercom/dormant': () => Promise<RemoteResult<DormantListResult>>
+    'intercom/groups': () => Promise<RemoteResult<GroupInfo[]>>
+    'intercom/list': () => Promise<RemoteResult<ConversationInfo[]>>
     'intercom/readConversation': (request: ReadConversationRequest) => Promise<RemoteResult<ReadConversationResult>>
     'intercom/readGroup': (request: ReadGroupRequest) => Promise<RemoteResult<ReadGroupResult>>
-    'intercom/createGroup': (request: CreateGroupRequest) => Promise<RemoteResult<CreateGroupResult>>
-    'intercom/addMember': (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
     'intercom/removeMember': (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
+    'intercom/send': (request: SendRequest) => Promise<RemoteResult<SendResult>>
+    'intercom/wakeSend': (request: WakeSendRequest) => Promise<RemoteResult<WakeSendResult>>
   }
   interface TypertRemoteNamespaceMap {
     'intercom': TypertRemoteNamespace$696e746572636f6d

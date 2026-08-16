@@ -94,6 +94,8 @@ let IntercomGateway = (() => {
 	let _list_decorators;
 	let _groups_decorators;
 	let _send_decorators;
+	let _dormant_decorators;
+	let _wakeSend_decorators;
 	let _broadcast_decorators;
 	let _readConversation_decorators;
 	let _readGroup_decorators;
@@ -106,6 +108,8 @@ let IntercomGateway = (() => {
 			_list_decorators = [Remote("list")];
 			_groups_decorators = [Remote("groups")];
 			_send_decorators = [Remote("send")];
+			_dormant_decorators = [Remote("dormant")];
+			_wakeSend_decorators = [Remote("wakeSend")];
 			_broadcast_decorators = [Remote("broadcast")];
 			_readConversation_decorators = [Remote("readConversation")];
 			_readGroup_decorators = [Remote("readGroup")];
@@ -142,6 +146,28 @@ let IntercomGateway = (() => {
 				access: {
 					has: (obj) => "send" in obj,
 					get: (obj) => obj.send
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
+			__esDecorate(this, null, _dormant_decorators, {
+				kind: "method",
+				name: "dormant",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "dormant" in obj,
+					get: (obj) => obj.dormant
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
+			__esDecorate(this, null, _wakeSend_decorators, {
+				kind: "method",
+				name: "wakeSend",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "wakeSend" in obj,
+					get: (obj) => obj.wakeSend
 				},
 				metadata: _metadata
 			}, null, _instanceExtraInitializers);
@@ -225,6 +251,7 @@ let IntercomGateway = (() => {
 		rateBuckets = /* @__PURE__ */ new Map();
 		counter = 0;
 		domain = null;
+		titleCache = /* @__PURE__ */ new Map();
 		get agents() {
 			return this.ctx.get("agents");
 		}
@@ -236,6 +263,9 @@ let IntercomGateway = (() => {
 		}
 		get subagents() {
 			return this.ctx.get("subagents");
+		}
+		get persistence() {
+			return this.ctx.get("sessionPersistence");
 		}
 		constructor(ctx) {
 			super(ctx, "intercom");
@@ -304,6 +334,34 @@ let IntercomGateway = (() => {
 			this.rateBuckets.set(targetId, fresh);
 			return true;
 		}
+		/**
+		* Compare two workspace paths the way the local filesystem does: on Windows
+		* the comparison is case-insensitive (and both separators normalize), so a
+		* historically-lowercased path does not read as a different workspace.
+		*/
+		sameWorkspace(a, b) {
+			if (a === b) return true;
+			const trim = (p) => p.replace(/[\\/]+$/, "");
+			const x = trim(a);
+			const y = trim(b);
+			return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+		}
+		/** Resolve a session title with a 5-minute cache; falls back to the id. */
+		async titleOfSession(sessionId) {
+			const now = Date.now();
+			const cached = this.titleCache.get(sessionId);
+			if (cached !== void 0 && now - cached.at < 3e5) return cached.title;
+			let title = sessionId;
+			if (this.queryService !== void 0) try {
+				const t = await this.queryService.readTitle(sessionId);
+				if (t !== void 0 && typeof t.title === "string" && t.title.trim() !== "") title = t.title;
+			} catch {}
+			this.titleCache.set(sessionId, {
+				title,
+				at: now
+			});
+			return title;
+		}
 		buildMessage(from, fromTitle, text) {
 			return {
 				id: this.mintId("dsh-intercom-"),
@@ -333,8 +391,6 @@ let IntercomGateway = (() => {
 		}
 		deliver(request) {
 			const { from, targetId } = request;
-			const text = String(request.text).slice(0, MAX_TEXT);
-			const delivery = request.delivery === "steer" ? "steer" : "wake";
 			if (from === targetId) return {
 				ok: false,
 				messageId: "",
@@ -368,11 +424,18 @@ let IntercomGateway = (() => {
 				targetStatus: "",
 				error: `target conversation is not live: ${targetId}`
 			};
+			return this.deliverTo(from, target, request);
+		}
+		/** Shared delivery core: workspace gate, rate limit, wake/queue/steer, group bookkeeping. */
+		deliverTo(from, target, request) {
+			const targetId = target.id;
+			const text = String(request.text).slice(0, MAX_TEXT);
+			const delivery = request.delivery === "steer" ? "steer" : "wake";
 			const fromAgent = this.agents.get(from);
 			if (request.allowCrossWorkspace !== true) {
 				const fromCwd = fromAgent === void 0 ? "" : this.cwdOf(fromAgent);
 				const targetCwd = this.cwdOf(target);
-				if (fromCwd !== "" && targetCwd !== "" && fromCwd !== targetCwd) return {
+				if (fromCwd !== "" && targetCwd !== "" && !this.sameWorkspace(fromCwd, targetCwd)) return {
 					ok: false,
 					messageId: "",
 					applied: "",
@@ -530,6 +593,103 @@ let IntercomGateway = (() => {
 				error: "from/targetId/text are required strings"
 			};
 			return this.deliver(request);
+		}
+		async dormant() {
+			const persistence = this.persistence;
+			if (persistence === void 0) return {
+				ok: false,
+				conversations: [],
+				error: "sessionPersistence service unavailable"
+			};
+			try {
+				const headers = await persistence.list();
+				const liveIds = new Set(this.agents.list().map((agent) => agent.id));
+				const items = [];
+				for (const header of headers) {
+					if (typeof header.id !== "string" || header.id === "") continue;
+					if (liveIds.has(header.id)) continue;
+					if (header.parentSession !== void 0) continue;
+					if (header.origin === "subagent") continue;
+					items.push({
+						id: header.id,
+						title: await this.titleOfSession(header.id),
+						cwd: typeof header.cwd === "string" ? header.cwd : "",
+						createdAt: typeof header.createdAt === "number" ? header.createdAt : 0
+					});
+				}
+				items.sort((a, b) => b.createdAt - a.createdAt);
+				return {
+					ok: true,
+					conversations: items,
+					error: ""
+				};
+			} catch (error) {
+				return {
+					ok: false,
+					conversations: [],
+					error: String(error instanceof Error ? error.message : error)
+				};
+			}
+		}
+		async wakeSend(request) {
+			if (request === null || typeof request !== "object" || typeof request.from !== "string" || typeof request.targetId !== "string" || typeof request.text !== "string") return {
+				ok: false,
+				messageId: "",
+				applied: "",
+				targetId: "",
+				targetStatus: "",
+				resumed: false,
+				error: "from/targetId/text are required strings"
+			};
+			return this.wakeSendInternal(request);
+		}
+		/** Wake (resume) a dormant top-level session when needed, then deliver like `send`. */
+		async wakeSendInternal(request) {
+			const from = request.from;
+			const targetId = request.targetId;
+			const fail = (error) => ({
+				ok: false,
+				messageId: "",
+				applied: "",
+				targetId,
+				targetStatus: "",
+				resumed: false,
+				error
+			});
+			if (from === targetId) return fail("cannot send to the same conversation");
+			if (!this.isRoot(from)) return fail("sender is not a top-level conversation; intercom is only for parent agents, use the built-in send_message tool for subagent children");
+			const fromAgent = this.agents.get(from);
+			let target = this.agents.get(targetId);
+			let resumed = false;
+			if (target === void 0) {
+				const persistence = this.persistence;
+				if (persistence === void 0) return fail("target conversation is not live and session persistence is unavailable");
+				let header;
+				try {
+					header = (await persistence.list()).find((h) => h.id === targetId);
+				} catch (error) {
+					return fail(`session listing failed: ${String(error instanceof Error ? error.message : error)}`);
+				}
+				if (header === void 0) return fail(`unknown session: ${targetId}`);
+				if (header.parentSession !== void 0) return fail("target is a subagent child, not a top-level conversation; use the built-in send_message tool for parent-child communication");
+				if (request.allowCrossWorkspace !== true) {
+					const fromCwd = fromAgent === void 0 ? "" : this.cwdOf(fromAgent);
+					const targetCwd = typeof header.cwd === "string" ? header.cwd : "";
+					if (fromCwd !== "" && targetCwd !== "" && !this.sameWorkspace(fromCwd, targetCwd)) return fail(`cross-workspace delivery blocked: from ${fromCwd} to ${targetCwd}`);
+				}
+				if (!this.rateAllowed(targetId)) return fail("rate limit exceeded for target conversation");
+				try {
+					target = (await this.agents.resume({ resumeSessionId: targetId })).agent;
+				} catch (error) {
+					return fail(`resume failed: ${String(error instanceof Error ? error.message : error)}`);
+				}
+				resumed = true;
+			}
+			if (target === void 0) return fail(`target is still not live after resume: ${targetId}`);
+			return {
+				...this.deliverTo(from, target, request),
+				resumed
+			};
 		}
 		broadcast(request) {
 			if (request === null || typeof request !== "object" || typeof request.groupId !== "string" || typeof request.from !== "string" || typeof request.text !== "string") return {
@@ -723,6 +883,28 @@ let IntercomGateway = (() => {
 				}
 			})));
 			disposers.push(tools.register(defineTool({
+				name: "intercom_list_dormant_conversations",
+				description: "List dormant (persisted but not live) TOP-LEVEL conversations in this DSH process: id, title, cwd and createdAt, newest first. These sessions are stored but have no running agent; use intercom_wake_send to resume one and deliver work to it (延续工作). Subagent children are excluded.",
+				parameters: {},
+				output: {
+					schema: {
+						type: "object",
+						additionalProperties: false,
+						properties: { conversations: {
+							type: "array",
+							required: true
+						} }
+					},
+					render: (_args, value) => [{
+						type: "text",
+						text: `dormant top-level conversations: ${JSON.stringify(value)}`
+					}]
+				},
+				execute: async () => {
+					return { conversations: (await this.dormant()).conversations };
+				}
+			})));
+			disposers.push(tools.register(defineTool({
 				name: "intercom_send",
 				description: "Send a message to another live TOP-LEVEL conversation (parent agent) in the SAME workspace. Both sender and target must be top-level conversations; for subagent children use the built-in send_message tool instead. target_id must be an exact id from intercom_list_conversations. delivery wake: an idle target immediately starts a new turn to work on it; a busy target queues it for its next step. delivery steer: inserts into the target's current turn (use sparingly). Rate-limited; wake budget prevents message loops. Use intercom_ask when you need a reply.",
 				parameters: {
@@ -789,6 +971,82 @@ let IntercomGateway = (() => {
 						applied: result.applied,
 						targetId: result.targetId,
 						targetStatus: result.targetStatus
+					};
+					throw new Error(result.error);
+				}
+			})));
+			disposers.push(tools.register(defineTool({
+				name: "intercom_wake_send",
+				description: "Wake a dormant (not live) TOP-LEVEL conversation and deliver a message so it starts working on it (唤醒休眠对话并延续工作). Use this to continue another conversation's work without opening it manually: the target session is resumed, then the message is delivered (idle target→wake, busy→queue). target_id may come from intercom_list_dormant_conversations, or be a live id from intercom_list_conversations. Same-workspace only, top-level conversations only; for subagent children use the built-in send_message tool.",
+				parameters: {
+					target_id: {
+						type: "string",
+						required: true,
+						description: "exact top-level session id (dormant or live)"
+					},
+					message: {
+						type: "string",
+						required: true,
+						description: "message text to deliver after waking"
+					},
+					delivery: {
+						type: "string",
+						required: true,
+						description: "delivery mode: wake (default behavior, also applied for any other value) or steer"
+					}
+				},
+				output: {
+					schema: {
+						type: "object",
+						additionalProperties: false,
+						properties: {
+							ok: {
+								type: "boolean",
+								required: true
+							},
+							messageId: {
+								type: "string",
+								required: true
+							},
+							applied: {
+								type: "string",
+								required: true
+							},
+							targetId: {
+								type: "string",
+								required: true
+							},
+							targetStatus: {
+								type: "string",
+								required: true
+							},
+							resumed: {
+								type: "boolean",
+								required: true
+							}
+						}
+					},
+					render: (_args, value) => [{
+						type: "text",
+						text: `wake-send ${value.resumed ? "(resumed dormant session) " : ""}${value.applied}`
+					}]
+				},
+				execute: async (args, exec) => {
+					const from = exec.agent;
+					if (from === void 0) throw new Error("intercom_wake_send requires a calling agent (exec.agent was undefined)");
+					const result = await this.wakeSendInternal({
+						from: from.id,
+						targetId: String(args.target_id),
+						text: String(args.message),
+						delivery: String(args.delivery ?? "wake")
+					});
+					if (result.ok) return {
+						ok: result.ok,
+						messageId: result.messageId,
+						applied: result.applied,
+						targetId: result.targetId,
+						targetStatus: result.targetStatus,
+						resumed: result.resumed
 					};
 					throw new Error(result.error);
 				}

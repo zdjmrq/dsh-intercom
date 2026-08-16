@@ -27,6 +27,8 @@ const STYLES = `
   .dsh-ic-badge { flex: none; padding: 1px 8px; border-radius: 10px; font-size: 11px; line-height: 16px; }
   .dsh-ic-badge.idle { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #1a7f37) 14%, transparent); color: var(--dsw-alias-state-success-primary, #1a7f37); }
   .dsh-ic-badge.running { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #9a6700) 16%, transparent); color: var(--dsw-alias-state-warn-primary, #9a6700); }
+  .dsh-ic-item.dormant { opacity: .55; }
+  .dsh-ic-item.dormant:hover { opacity: .85; }
   .dsh-ic-cwd { display: block; color: var(--dsw-alias-label-secondary, #6b7280); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dsh-ic-btn { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.14)); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-primary, #1f2328); font-size: 12.5px; cursor: pointer; }
   .dsh-ic-btn:hover { background: var(--dsw-alias-bg-layer-2, rgba(0,0,0,.05)); }
@@ -75,14 +77,17 @@ const STYLES = `
 `
 
 interface ConversationInfo { id: string; title: string; status: string; cwd: string; provider: string; model: string }
+interface DormantConversation { id: string; title: string; cwd: string; createdAt: number }
 interface GroupInfo { id: string; name: string; memberCount: number; members: string[] }
 interface MessageEntry { role: 'user' | 'assistant'; text: string; time: number; memberId?: string; memberTitle?: string }
 interface RemoteEnvelope<T> { ok: boolean; value?: T; error?: { message: string } }
 
 interface RemoteFace {
   list(): Promise<RemoteEnvelope<ConversationInfo[]>>
+  dormant(): Promise<RemoteEnvelope<{ ok: boolean; conversations: DormantConversation[]; error: string }>>
   groups(): Promise<RemoteEnvelope<GroupInfo[]>>
   send(request: { from: string; targetId: string; text: string; delivery: string }): Promise<RemoteEnvelope<{ ok: boolean; messageId: string; applied: string; targetId: string; targetStatus: string; error: string }>>
+  wakeSend(request: { from: string; targetId: string; text: string; delivery: string }): Promise<RemoteEnvelope<{ ok: boolean; messageId: string; applied: string; targetId: string; targetStatus: string; resumed: boolean; error: string }>>
   broadcast(request: { groupId: string; from: string; text: string; delivery: string }): Promise<RemoteEnvelope<{ ok: boolean; groupId: string; results: Array<{ targetId: string; ok: boolean; applied: string; error: string }>; error: string }>>
   readConversation(request: { sessionId: string; maxEvents: number }): Promise<RemoteEnvelope<{ ok: boolean; entries: MessageEntry[]; error: string }>>
   readGroup(request: { groupId: string; sinceTime: number }): Promise<RemoteEnvelope<{ ok: boolean; entries: MessageEntry[]; error: string }>>
@@ -194,6 +199,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
   const { store, remote, sessions, workspaces, notify } = props
   const [tab, setTab] = useState<'conv' | 'group'>('conv')
   const [conversations, setConversations] = useState<ConversationInfo[]>([])
+  const [dormant, setDormant] = useState<DormantConversation[]>([])
   const [groups, setGroups] = useState<GroupInfo[]>([])
   const [convId, setConvId] = useState('')
   const [groupId, setGroupId] = useState('')
@@ -215,6 +221,8 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
         const first = list.value[0]
         if (convId === '' && first !== undefined) setConvId(first.id)
       }
+      const dormantList = await remote.dormant()
+      if (dormantList.ok && dormantList.value !== undefined) setDormant(dormantList.value.conversations)
       const groupList = await remote.groups()
       if (groupList.ok && groupList.value !== undefined) {
         setGroups(groupList.value)
@@ -261,9 +269,18 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
     try {
       if (tab === 'conv') {
         if (convId === '') { say('请先选择一个会话'); return }
-        const r = await remote.send({ from: store.currentSessionId, targetId: convId, text, delivery })
-        if (r.ok && r.value !== undefined && r.value.ok) say(`已发送 (${r.value.applied})`, 'ok')
-        else say(`发送失败: ${r.value?.error ?? r.error?.message ?? 'unknown'}`, 'err')
+        const isDormant = dormant.some(d => d.id === convId)
+        if (isDormant) {
+          const r = await remote.wakeSend({ from: store.currentSessionId, targetId: convId, text, delivery })
+          if (r.ok && r.value !== undefined && r.value.ok) {
+            say(`已唤醒并发送 (${r.value.applied})`, 'ok')
+            void refreshLists()
+          } else say(`唤醒发送失败: ${r.value?.error ?? r.error?.message ?? 'unknown'}`, 'err')
+        } else {
+          const r = await remote.send({ from: store.currentSessionId, targetId: convId, text, delivery })
+          if (r.ok && r.value !== undefined && r.value.ok) say(`已发送 (${r.value.applied})`, 'ok')
+          else say(`发送失败: ${r.value?.error ?? r.error?.message ?? 'unknown'}`, 'err')
+        }
       } else {
         if (groupId === '') { say('请先选择一个群'); return }
         const r = await remote.broadcast({ groupId, from: store.currentSessionId, text, delivery })
@@ -326,9 +343,10 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
   }
 
   const currentConv = conversations.find(c => c.id === convId)
+  const currentDormant = dormant.find(d => d.id === convId)
   const currentGroup = groups.find(g => g.id === groupId)
   const currentTitle = tab === 'conv'
-    ? (currentConv === undefined ? (convId === '' ? '未选择' : convId) : currentConv.title)
+    ? (currentConv === undefined ? (currentDormant === undefined ? (convId === '' ? '未选择' : convId) : currentDormant.title) : currentConv.title)
     : (currentGroup === undefined ? (groupId === '' ? '未选择' : groupId) : currentGroup.name)
   const addCandidates = conversations.filter(c => currentGroup === undefined || !currentGroup.members.includes(c.id))
   const entries = tab === 'conv' ? convEntries : groupEntries
@@ -354,6 +372,14 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
                   h('span', { className: 'dsh-ic-badge ' + (c.status === 'running' ? 'running' : 'idle') }, c.status === 'running' ? '忙碌' : '空闲'),
                 ),
                 h('span', { className: 'dsh-ic-cwd', title: c.cwd }, `📁 ${c.cwd || ''}`),
+              )),
+              dormant.length > 0 ? h('div', { className: 'dsh-ic-sec-title', style: { margin: '10px 4px 4px' } }, `休眠会话 (${dormant.length}) · 发送即唤醒`) : null,
+              dormant.map(d => h('div', { key: d.id, className: 'dsh-ic-item dormant' + (d.id === convId ? ' active' : ''), onClick: () => { setConvId(d.id); setTab('conv') } },
+                h('div', { className: 'dsh-ic-item-head' },
+                  h('span', { className: 'dsh-ic-item-title', title: d.id }, d.title),
+                  h('span', { className: 'dsh-ic-badge idle' }, '💤 休眠'),
+                ),
+                h('span', { className: 'dsh-ic-cwd', title: d.cwd }, `📁 ${d.cwd || ''}`),
               )),
             )
           : h('div', { className: 'dsh-ic-list' },
@@ -385,6 +411,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
         h('div', { className: 'dsh-ic-chat-head' },
           h('span', { className: 'dsh-ic-chat-title', title: currentTitle }, currentTitle),
           tab === 'conv' && currentConv !== undefined ? h('span', { className: 'dsh-ic-badge ' + (currentConv.status === 'running' ? 'running' : 'idle') }, currentConv.status === 'running' ? '忙碌' : '空闲') : null,
+          tab === 'conv' && currentConv === undefined && currentDormant !== undefined ? h('span', { className: 'dsh-ic-badge idle' }, '💤 休眠 · 发送即唤醒') : null,
           tab === 'conv' && convId !== '' ? h('button', { className: 'dsh-ic-btn', onClick: () => openSession(convId), title: '在界面中打开' }, '打开') : null,
         ),
         (tab === 'conv' && convId === '') || (tab === 'group' && groupId === '')
@@ -401,8 +428,8 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
             h('option', { value: 'wake' }, '唤醒'),
             h('option', { value: 'steer' }, '介入'),
           ),
-          h('textarea', { className: 'dsh-ic-input', style: { flex: 1, margin: 0, minHeight: 34, maxHeight: 90 }, rows: 1, value: text, onChange: (e: ValueEvent) => setText(e.target.value), placeholder: tab === 'conv' ? '发消息给该会话…' : '广播给群成员…' }),
-          h('button', { className: 'dsh-ic-btn dsh-ic-btn-primary', style: { flex: 'none' }, onClick: () => { void send() } }, '发送'),
+          h('textarea', { className: 'dsh-ic-input', style: { flex: 1, margin: 0, minHeight: 34, maxHeight: 90 }, rows: 1, value: text, onChange: (e: ValueEvent) => setText(e.target.value), placeholder: tab === 'conv' ? (currentConv === undefined && currentDormant !== undefined ? '该会话休眠中,发送将唤醒它…' : '发消息给该会话…') : '广播给群成员…' }),
+          h('button', { className: 'dsh-ic-btn dsh-ic-btn-primary', style: { flex: 'none' }, onClick: () => { void send() } }, tab === 'conv' && currentConv === undefined && currentDormant !== undefined ? '唤醒并发送' : '发送'),
         ),
         h('div', { className: 'dsh-ic-feedback' + (feedback.tone === 'err' ? ' err' : feedback.tone === 'ok' ? ' ok' : ''), style: { flex: 'none', padding: '2px 12px 8px' } }, feedback.text),
       ),

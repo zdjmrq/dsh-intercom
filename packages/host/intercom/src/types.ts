@@ -122,6 +122,42 @@ export type GroupMemberRequest = {
   memberId: string
 }
 
+/** One dormant (persisted but not live) top-level session, projected for the panel. */
+export type DormantConversation = {
+  id: string
+  title: string
+  cwd: string
+  createdAt: number
+}
+
+export type DormantListResult = {
+  ok: boolean
+  conversations: DormantConversation[]
+  error: string
+}
+
+export type WakeSendRequest = {
+  from: string
+  targetId: string
+  text: string
+  /** `wake` (default) or `steer`. */
+  delivery: string
+  /** Explicit opt-in for cross-workspace delivery. */
+  allowCrossWorkspace?: boolean
+}
+
+export type WakeSendResult = {
+  ok: boolean
+  messageId: string
+  /** `wake` | `queue` | `steer`. */
+  applied: string
+  targetId: string
+  targetStatus: string
+  /** True when this call resumed a dormant session before delivering. */
+  resumed: boolean
+  error: string
+}
+
 export type OkResult = {
   ok: boolean
   error: string

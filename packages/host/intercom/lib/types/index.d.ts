@@ -17,7 +17,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
-import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRequest, CreateGroupResult, GroupInfo, GroupMemberRequest, OkResult, ReadConversationRequest, ReadConversationResult, ReadGroupRequest, ReadGroupResult, SendRequest, SendResult } from './types.ts';
+import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRequest, CreateGroupResult, DormantListResult, GroupInfo, GroupMemberRequest, OkResult, ReadConversationRequest, ReadConversationResult, ReadGroupRequest, ReadGroupResult, SendRequest, SendResult, WakeSendRequest, WakeSendResult } from './types.ts';
 export type * from './types.ts';
 export { intercomDomain } from './spec.ts';
 export declare class IntercomGateway extends TypertRemoteService {
@@ -28,10 +28,12 @@ export declare class IntercomGateway extends TypertRemoteService {
     private rateBuckets;
     private counter;
     private domain;
+    private titleCache;
     private get agents();
     private get titleService();
     private get queryService();
     private get subagents();
+    private get persistence();
     constructor(ctx: Context);
     private mintId;
     private titleOf;
@@ -40,9 +42,19 @@ export declare class IntercomGateway extends TypertRemoteService {
     private ensureAutoGroup;
     private autoAddToGroup;
     private rateAllowed;
+    /**
+     * Compare two workspace paths the way the local filesystem does: on Windows
+     * the comparison is case-insensitive (and both separators normalize), so a
+     * historically-lowercased path does not read as a different workspace.
+     */
+    private sameWorkspace;
+    /** Resolve a session title with a 5-minute cache; falls back to the id. */
+    private titleOfSession;
     private buildMessage;
     private recordOutbox;
     private deliver;
+    /** Shared delivery core: workspace gate, rate limit, wake/queue/steer, group bookkeeping. */
+    private deliverTo;
     private surfaceEntries;
     private surfaceText;
     private lastAssistantText;
@@ -52,6 +64,10 @@ export declare class IntercomGateway extends TypertRemoteService {
     list(): ConversationInfo[];
     groups(): GroupInfo[];
     send(request: SendRequest): SendResult;
+    dormant(): Promise<DormantListResult>;
+    wakeSend(request: WakeSendRequest): Promise<WakeSendResult>;
+    /** Wake (resume) a dormant top-level session when needed, then deliver like `send`. */
+    private wakeSendInternal;
     broadcast(request: BroadcastRequest): BroadcastResult;
     readConversation(request: ReadConversationRequest): Promise<ReadConversationResult>;
     readGroup(request: ReadGroupRequest): Promise<ReadGroupResult>;
