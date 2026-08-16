@@ -918,10 +918,23 @@ let IntercomGateway = (() => {
 			const backfill = [];
 			const seenDirect = /* @__PURE__ */ new Set();
 			const seenBroadcast = /* @__PURE__ */ new Set();
-			for (const memberId of group.members) try {
-				const surface = await this.queryService.readSurface(memberId);
-				const agent = this.agents.get(memberId);
-				const label = agent === void 0 ? this.titleOfById(memberId) : this.titleOf(agent);
+			const surfaceResults = await Promise.all(group.members.map(async (memberId) => {
+				try {
+					const surface = await this.queryService?.readSurface(memberId);
+					if (surface === void 0) return null;
+					const agent = this.agents.get(memberId);
+					return {
+						memberId,
+						label: agent === void 0 ? this.titleOfById(memberId) : this.titleOf(agent),
+						surface
+					};
+				} catch {
+					return null;
+				}
+			}));
+			for (const result of surfaceResults) {
+				if (result === null) continue;
+				const { memberId, label, surface } = result;
 				for (const entry of this.surfaceEntries(surface.events, sinceTime)) merged.push({
 					...entry,
 					memberId,
@@ -966,7 +979,7 @@ let IntercomGateway = (() => {
 						});
 					}
 				}
-			} catch {}
+			}
 			merged.sort((a, b) => a.time - b.time);
 			const live = this.relayLog.get(groupId) ?? [];
 			const liveIds = new Set(live.map((r) => r.messageId).filter((id) => id !== ""));

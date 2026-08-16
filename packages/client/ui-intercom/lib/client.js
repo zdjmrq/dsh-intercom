@@ -186,6 +186,7 @@ window.__ModuleLoader__.load({
 			const [newGroupName, setNewGroupName] = (0, react.useState)("");
 			const [addMemberId, setAddMemberId] = (0, react.useState)("");
 			const [confirmDeleteGroup, setConfirmDeleteGroup] = (0, react.useState)(false);
+			const [loadedOnce, setLoadedOnce] = (0, react.useState)(false);
 			const [feedback, setFeedback] = (0, react.useState)({
 				text: "",
 				tone: ""
@@ -258,7 +259,10 @@ window.__ModuleLoader__.load({
 							sessionId: convId,
 							maxEvents: 80
 						});
-						if (r.ok && r.value !== void 0) setConvEntries(r.value.entries);
+						if (r.ok && r.value !== void 0) {
+							setConvEntries(r.value.entries);
+							setLoadedOnce(true);
+						}
 					} else if (tab === "group" && groupId !== "") {
 						const r = await remote.readGroup({
 							groupId,
@@ -267,6 +271,7 @@ window.__ModuleLoader__.load({
 						if (r.ok && r.value !== void 0) {
 							setGroupEntries(r.value.entries);
 							setGroupRelays(r.value.relays ?? []);
+							setLoadedOnce(true);
 						}
 					}
 				} catch {}
@@ -520,6 +525,7 @@ window.__ModuleLoader__.load({
 				onClick: () => {
 					setConvId(c.id);
 					setTab("conv");
+					refreshHistory();
 				}
 			}, (0, react.createElement)("div", { className: "dsh-ic-item-head" }, (0, react.createElement)("span", {
 				className: "dsh-ic-item-title",
@@ -536,6 +542,7 @@ window.__ModuleLoader__.load({
 				onClick: () => {
 					setConvId(d.id);
 					setTab("conv");
+					refreshHistory();
 				}
 			}, (0, react.createElement)("div", { className: "dsh-ic-item-head" }, (0, react.createElement)("span", {
 				className: "dsh-ic-item-title",
@@ -549,6 +556,7 @@ window.__ModuleLoader__.load({
 				onClick: () => {
 					setGroupId(g.id);
 					setConfirmDeleteGroup(false);
+					refreshHistory();
 				}
 			}, (0, react.createElement)("div", { className: "dsh-ic-item-head" }, (0, react.createElement)("span", {
 				className: "dsh-ic-item-title",
@@ -622,7 +630,7 @@ window.__ModuleLoader__.load({
 			}, (0, react.createElement)("div", { className: "dsh-ic-relay-head" }, r.toId === "*" ? `📢 ${r.fromTitle} → 全体成员` : `📤 ${r.fromTitle} → ${r.toTitle}`), (0, react.createElement)("div", { className: "dsh-ic-relay-text" }, r.text)))) : null, tab === "conv" && convId === "" || tab === "group" && groupId === "" ? (0, react.createElement)("div", { className: "dsh-ic-empty" }, "从左侧选择一个会话或群,开始查看和发送消息") : (0, react.createElement)("div", { className: "dsh-ic-msgs" }, displayEntries.map((m, index) => (0, react.createElement)("div", {
 				key: `${m.time}-${index}`,
 				className: "dsh-ic-msg " + m.role
-			}, m.memberTitle !== void 0 && m.memberTitle !== "" ? (0, react.createElement)("span", { className: "dsh-ic-msg-from" }, tab === "group" && m.role === "user" ? `${m.memberTitle} 的输入` : m.memberTitle) : null, m.text)), displayEntries.length === 0 ? (0, react.createElement)("div", { className: "dsh-ic-empty" }, "暂无消息") : null), (0, react.createElement)("div", { className: "dsh-ic-composer" }, (0, react.createElement)("select", {
+			}, m.memberTitle !== void 0 && m.memberTitle !== "" ? (0, react.createElement)("span", { className: "dsh-ic-msg-from" }, tab === "group" && m.role === "user" ? `${m.memberTitle} 的输入` : m.memberTitle) : null, m.text)), displayEntries.length === 0 ? (0, react.createElement)("div", { className: "dsh-ic-empty" }, loadedOnce ? "暂无消息" : "加载中…") : null), (0, react.createElement)("div", { className: "dsh-ic-composer" }, (0, react.createElement)("select", {
 				className: "dsh-ic-input",
 				style: {
 					width: 108,

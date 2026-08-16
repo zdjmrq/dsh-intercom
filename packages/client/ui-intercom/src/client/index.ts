@@ -227,6 +227,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
   const [newGroupName, setNewGroupName] = useState('')
   const [addMemberId, setAddMemberId] = useState('')
   const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false)
+  const [loadedOnce, setLoadedOnce] = useState(false)
   const [feedback, setFeedback] = useState<{ text: string; tone: string }>({ text: '', tone: '' })
 
   const say = (message: string, tone = ''): void => { setFeedback({ text: message, tone }) }
@@ -287,12 +288,13 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
     try {
       if (tab === 'conv' && convId !== '') {
         const r = await remote.readConversation({ sessionId: convId, maxEvents: 80 })
-        if (r.ok && r.value !== undefined) setConvEntries(r.value.entries)
+        if (r.ok && r.value !== undefined) { setConvEntries(r.value.entries); setLoadedOnce(true) }
       } else if (tab === 'group' && groupId !== '') {
         const r = await remote.readGroup({ groupId, sinceTime: 0 })
         if (r.ok && r.value !== undefined) {
           setGroupEntries(r.value.entries)
           setGroupRelays(r.value.relays ?? [])
+          setLoadedOnce(true)
         }
       }
     } catch { /* history is best-effort */ }
@@ -465,7 +467,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
         ),
         tab === 'conv'
           ? h('div', { className: 'dsh-ic-list' },
-              conversations.map(c => h('div', { key: c.id, className: 'dsh-ic-item' + (c.id === convId ? ' active' : ''), onClick: () => { setConvId(c.id); setTab('conv') } },
+              conversations.map(c => h('div', { key: c.id, className: 'dsh-ic-item' + (c.id === convId ? ' active' : ''), onClick: () => { setConvId(c.id); setTab('conv'); void refreshHistory() } },
                 h('div', { className: 'dsh-ic-item-head' },
                   h('span', { className: 'dsh-ic-item-title', title: c.id }, c.title),
                   h('span', { className: 'dsh-ic-badge ' + (c.status === 'running' ? 'running' : 'idle') }, c.status === 'running' ? '忙碌' : '空闲'),
@@ -473,7 +475,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
                 h('span', { className: 'dsh-ic-cwd', title: c.cwd }, `📁 ${c.cwd || ''}`),
               )),
               dormant.length > 0 ? h('div', { className: 'dsh-ic-sec-title', style: { margin: '10px 4px 4px' } }, `休眠会话 (${dormant.length}) · 发送即唤醒`) : null,
-              dormant.map(d => h('div', { key: d.id, className: 'dsh-ic-item dormant' + (d.id === convId ? ' active' : ''), onClick: () => { setConvId(d.id); setTab('conv') } },
+              dormant.map(d => h('div', { key: d.id, className: 'dsh-ic-item dormant' + (d.id === convId ? ' active' : ''), onClick: () => { setConvId(d.id); setTab('conv'); void refreshHistory() } },
                 h('div', { className: 'dsh-ic-item-head' },
                   h('span', { className: 'dsh-ic-item-title', title: d.id }, d.title),
                   h('span', { className: 'dsh-ic-badge idle' }, '💤 休眠'),
@@ -482,7 +484,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
               )),
             )
           : h('div', { className: 'dsh-ic-list' },
-              groups.map(g => h('div', { key: g.id, className: 'dsh-ic-item' + (g.id === groupId ? ' active' : ''), onClick: () => { setGroupId(g.id); setConfirmDeleteGroup(false) } },
+              groups.map(g => h('div', { key: g.id, className: 'dsh-ic-item' + (g.id === groupId ? ' active' : ''), onClick: () => { setGroupId(g.id); setConfirmDeleteGroup(false); void refreshHistory() } },
                 h('div', { className: 'dsh-ic-item-head' },
                   h('span', { className: 'dsh-ic-item-title', title: g.id }, g.name),
                   h('span', { className: 'dsh-ic-badge idle' }, `${g.memberCount} 人`),
@@ -532,7 +534,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
                 m.memberTitle !== undefined && m.memberTitle !== '' ? h('span', { className: 'dsh-ic-msg-from' }, tab === 'group' && m.role === 'user' ? `${m.memberTitle} 的输入` : m.memberTitle) : null,
                 m.text,
               )),
-              displayEntries.length === 0 ? h('div', { className: 'dsh-ic-empty' }, '暂无消息') : null,
+              displayEntries.length === 0 ? h('div', { className: 'dsh-ic-empty' }, loadedOnce ? '暂无消息' : '加载中…') : null,
             ),
         h('div', { className: 'dsh-ic-composer' },
           h('select', { className: 'dsh-ic-input', style: { width: 108, flex: 'none', margin: 0 }, value: delivery, onChange: (e: ValueEvent) => setDelivery(e.target.value) },

@@ -704,66 +704,79 @@ let IntercomGateway = (() => {
             const backfill = [];
             const seenDirect = new Set();
             const seenBroadcast = new Set();
-            for (const memberId of group.members) {
+            // Read every member surface in parallel: the auto group can accumulate
+            // many members (every conversation that ever exchanged a message), and a
+            // serial read makes the panel feel like it never opens.
+            const surfaceResults = await Promise.all(group.members.map(async (memberId) => {
                 try {
-                    const surface = await this.queryService.readSurface(memberId);
+                    const surface = await this.queryService?.readSurface(memberId);
+                    if (surface === undefined)
+                        return null;
                     const agent = this.agents.get(memberId);
                     const label = agent === undefined ? this.titleOfById(memberId) : this.titleOf(agent);
-                    for (const entry of this.surfaceEntries(surface.events, sinceTime)) {
-                        merged.push({ ...entry, memberId, memberTitle: label });
+                    return { memberId, label, surface };
+                }
+                catch {
+                    return null; // skip unreadable member
+                }
+            }));
+            for (const result of surfaceResults) {
+                if (result === null)
+                    continue;
+                const { memberId, label, surface } = result;
+                for (const entry of this.surfaceEntries(surface.events, sinceTime)) {
+                    merged.push({ ...entry, memberId, memberTitle: label });
+                }
+                // Backfill the relay feed from the persisted relay messages, so the
+                // directed view ("A → B" / "A → 全体") survives backend restarts.
+                for (const event of surface.events) {
+                    if (typeof event.time !== 'number' || event.time <= sinceTime)
+                        continue;
+                    const message = event.data?.message;
+                    if (message === undefined || message.source === undefined)
+                        continue;
+                    const source = message.source;
+                    if (source.kind !== 'plugin' || source.plugin !== 'intercom')
+                        continue;
+                    if (typeof source.senderSessionId !== 'string')
+                        continue;
+                    const text = this.messageText(message);
+                    if (text === '')
+                        continue;
+                    if (source.broadcast === true) {
+                        const key = `bc|${source.senderSessionId}|${text}`;
+                        if (seenBroadcast.has(key))
+                            continue;
+                        seenBroadcast.add(key);
+                        backfill.push({
+                            id: this.mintId('relay-'),
+                            messageId: key,
+                            fromId: source.senderSessionId,
+                            fromTitle: this.titleOfById(source.senderSessionId),
+                            toId: '*',
+                            toTitle: '全体成员',
+                            text,
+                            time: event.time,
+                        });
                     }
-                    // Backfill the relay feed from the persisted relay messages, so the
-                    // directed view ("A → B" / "A → 全体") survives backend restarts.
-                    for (const event of surface.events) {
-                        if (typeof event.time !== 'number' || event.time <= sinceTime)
+                    else {
+                        const mid = typeof message.id === 'string' ? message.id : '';
+                        if (mid !== '' && seenDirect.has(mid))
                             continue;
-                        const message = event.data?.message;
-                        if (message === undefined || message.source === undefined)
-                            continue;
-                        const source = message.source;
-                        if (source.kind !== 'plugin' || source.plugin !== 'intercom')
-                            continue;
-                        if (typeof source.senderSessionId !== 'string')
-                            continue;
-                        const text = this.messageText(message);
-                        if (text === '')
-                            continue;
-                        if (source.broadcast === true) {
-                            const key = `bc|${source.senderSessionId}|${text}`;
-                            if (seenBroadcast.has(key))
-                                continue;
-                            seenBroadcast.add(key);
-                            backfill.push({
-                                id: this.mintId('relay-'),
-                                messageId: key,
-                                fromId: source.senderSessionId,
-                                fromTitle: this.titleOfById(source.senderSessionId),
-                                toId: '*',
-                                toTitle: '全体成员',
-                                text,
-                                time: event.time,
-                            });
-                        }
-                        else {
-                            const mid = typeof message.id === 'string' ? message.id : '';
-                            if (mid !== '' && seenDirect.has(mid))
-                                continue;
-                            if (mid !== '')
-                                seenDirect.add(mid);
-                            backfill.push({
-                                id: this.mintId('relay-'),
-                                messageId: mid,
-                                fromId: source.senderSessionId,
-                                fromTitle: this.titleOfById(source.senderSessionId),
-                                toId: memberId,
-                                toTitle: label,
-                                text,
-                                time: event.time,
-                            });
-                        }
+                        if (mid !== '')
+                            seenDirect.add(mid);
+                        backfill.push({
+                            id: this.mintId('relay-'),
+                            messageId: mid,
+                            fromId: source.senderSessionId,
+                            fromTitle: this.titleOfById(source.senderSessionId),
+                            toId: memberId,
+                            toTitle: label,
+                            text,
+                            time: event.time,
+                        });
                     }
                 }
-                catch { /* skip unreadable member */ }
             }
             merged.sort((a, b) => a.time - b.time);
             const live = this.relayLog.get(groupId) ?? [];
