@@ -70,7 +70,7 @@ interface AgentsService {
   list(): AgentLike[]
   roots(): AgentLike[]
   create(options: unknown): Promise<{ agent: AgentLike }>
-  resume(options: { resumeSessionId: string }): Promise<{ agent: AgentLike }>
+  resume(options: { resumeSessionId: string; agentOptions?: { provider?: string; model?: string } }): Promise<{ agent: AgentLike }>
 }
 
 interface TitleService {
@@ -95,6 +95,13 @@ interface SessionHeaderLike {
 
 interface PersistenceService {
   list(): Promise<SessionHeaderLike[]>
+  inspect(sessionId: string): Promise<{ meta: SessionHeaderLike; events: RawLogEventLike[] }>
+}
+
+/** Minimal shape of one raw persisted session event — only the leaves the plugin reads. */
+interface RawLogEventLike {
+  type: string
+  data?: { header?: { config?: { provider?: string; model?: string } } }
 }
 
 interface ProjectionCacheLike {
@@ -613,8 +620,10 @@ export class IntercomGateway extends TypertRemoteService {
         }
       }
       if (!this.rateAllowed(targetId)) return fail('rate limit exceeded for target conversation')
+      const agentOptions = await this.resolveTargetModel(targetId)
+      if (agentOptions === undefined) return fail(`cannot resume ${targetId}: no model route (no logged request/header and no deployment default)`)
       try {
-        const handle = await this.agents.resume({ resumeSessionId: targetId })
+        const handle = await this.agents.resume({ resumeSessionId: targetId, agentOptions })
         target = handle.agent
       } catch (error) {
         return fail(`resume failed: ${String(error instanceof Error ? error.message : error)}`)
@@ -624,6 +633,46 @@ export class IntercomGateway extends TypertRemoteService {
     if (target === undefined) return fail(`target is still not live after resume: ${targetId}`)
     const result = this.deliverTo(from, target, request)
     return { ...result, resumed }
+  }
+
+  /**
+   * Resolve the model route a dormant session should resume with: its own
+   * latest logged request/header first, else the deployment default model.
+   *
+   * A resumed agent built WITHOUT agentOptions ends up with
+   * options.model === undefined, which makes the {{model}} persona variable
+   * throw at prompt assembly ("no value for this assembly") and the whole
+   * woken turn fails. The official web resume path always supplies a route, so
+   * wake MUST do the same — preferring the session's own recorded model and
+   * never inventing one the deployment does not know.
+   */
+  private async resolveTargetModel(targetId: string): Promise<{ provider: string; model: string } | undefined> {
+    const persistence = this.persistence
+    if (persistence !== undefined) {
+      try {
+        const inspected = await persistence.inspect(targetId)
+        if (Array.isArray(inspected?.events)) {
+          for (let i = inspected.events.length - 1; i >= 0; i--) {
+            const event = inspected.events[i]
+            if (event?.type !== 'request/header') continue
+            const config = event.data?.header?.config
+            if (typeof config?.provider === 'string' && config.provider !== ''
+              && typeof config?.model === 'string' && config.model !== '') {
+              return { provider: config.provider, model: config.model }
+            }
+          }
+        }
+      } catch {
+        // inspect unavailable; fall through to the deployment default
+      }
+    }
+    const defaults = this.ctx.get('agentDefaultModel') as { currentSelection?: () => { provider?: string; model?: string } } | undefined
+    const selection = defaults?.currentSelection?.()
+    if (selection !== undefined && typeof selection.provider === 'string' && selection.provider !== ''
+      && typeof selection.model === 'string' && selection.model !== '') {
+      return { provider: selection.provider, model: selection.model }
+    }
+    return undefined
   }
 
   @Remote('broadcast')
