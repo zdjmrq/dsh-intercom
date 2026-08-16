@@ -105,6 +105,11 @@ function wait(ms: number): Promise<void> {
 }
 
 export class IntercomGateway extends TypertRemoteService {
+  // Wait until the tool registry and the storage-domain facility are mounted:
+  // without this declaration apply() can run before either provider activates,
+  // silently skipping model-tool registration and durable-group loading.
+  static inject = ['tools', 'storageDomain']
+
   private groupStore = new Map<string, GroupValue>()
   private outbox = new Map<string, SentRecord[]>()
   private spentWakes = new WeakMap<object, number>()

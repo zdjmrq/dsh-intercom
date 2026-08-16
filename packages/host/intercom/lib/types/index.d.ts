@@ -21,6 +21,7 @@ import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRe
 export type * from './types.ts';
 export { intercomDomain } from './spec.ts';
 export declare class IntercomGateway extends TypertRemoteService {
+    static inject: string[];
     private groupStore;
     private outbox;
     private spentWakes;

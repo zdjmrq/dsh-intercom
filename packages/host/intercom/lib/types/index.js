@@ -96,6 +96,10 @@ let IntercomGateway = (() => {
             __esDecorate(this, null, _removeMember_decorators, { kind: "method", name: "removeMember", static: false, private: false, access: { has: obj => "removeMember" in obj, get: obj => obj.removeMember }, metadata: _metadata }, null, _instanceExtraInitializers);
             if (_metadata) Object.defineProperty(this, Symbol.metadata, { enumerable: true, configurable: true, writable: true, value: _metadata });
         }
+        // Wait until the tool registry and the storage-domain facility are mounted:
+        // without this declaration apply() can run before either provider activates,
+        // silently skipping model-tool registration and durable-group loading.
+        static inject = ['tools', 'storageDomain'];
         groupStore = (__runInitializers(this, _instanceExtraInitializers), new Map());
         outbox = new Map();
         spentWakes = new WeakMap();

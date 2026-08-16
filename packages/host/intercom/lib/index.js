@@ -218,6 +218,7 @@ let IntercomGateway = (() => {
 				value: _metadata
 			});
 		}
+		static inject = ["tools", "storageDomain"];
 		groupStore = (__runInitializers(this, _instanceExtraInitializers), /* @__PURE__ */ new Map());
 		outbox = /* @__PURE__ */ new Map();
 		spentWakes = /* @__PURE__ */ new WeakMap();
