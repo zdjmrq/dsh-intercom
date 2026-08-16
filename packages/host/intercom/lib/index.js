@@ -102,6 +102,7 @@ let IntercomGateway = (() => {
 	let _createGroup_decorators;
 	let _addMember_decorators;
 	let _removeMember_decorators;
+	let _removeGroup_decorators;
 	return class IntercomGateway extends _classSuper {
 		static {
 			const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
@@ -116,6 +117,7 @@ let IntercomGateway = (() => {
 			_createGroup_decorators = [Remote("createGroup")];
 			_addMember_decorators = [Remote("addMember")];
 			_removeMember_decorators = [Remote("removeMember")];
+			_removeGroup_decorators = [Remote("removeGroup")];
 			__esDecorate(this, null, _list_decorators, {
 				kind: "method",
 				name: "list",
@@ -234,6 +236,17 @@ let IntercomGateway = (() => {
 				access: {
 					has: (obj) => "removeMember" in obj,
 					get: (obj) => obj.removeMember
+				},
+				metadata: _metadata
+			}, null, _instanceExtraInitializers);
+			__esDecorate(this, null, _removeGroup_decorators, {
+				kind: "method",
+				name: "removeGroup",
+				static: false,
+				private: false,
+				access: {
+					has: (obj) => "removeGroup" in obj,
+					get: (obj) => obj.removeGroup
 				},
 				metadata: _metadata
 			}, null, _instanceExtraInitializers);
@@ -422,11 +435,12 @@ let IntercomGateway = (() => {
 			if (list.length > 200) list.shift();
 			this.relayLog.set(groupId, list);
 		}
-		buildRelay(from, toId, text) {
+		buildRelay(from, toId, text, messageId) {
 			const fromAgent = this.agents.get(from);
 			const toAgent = toId === "*" ? void 0 : this.agents.get(toId);
 			return {
 				id: this.mintId("relay-"),
+				messageId,
 				fromId: from,
 				fromTitle: fromAgent === void 0 ? from : this.titleOf(fromAgent),
 				toId,
@@ -436,15 +450,15 @@ let IntercomGateway = (() => {
 			};
 		}
 		/** A direct send becomes a feed entry of every group containing both parties. */
-		recordRelayForPair(from, targetId, text) {
-			const relay = this.buildRelay(from, targetId, text);
+		recordRelayForPair(from, targetId, text, messageId) {
+			const relay = this.buildRelay(from, targetId, text, messageId);
 			for (const [groupId, group] of this.groupStore) if (group.members.includes(from) && group.members.includes(targetId)) this.recordRelay(groupId, relay);
 		}
 		/** A broadcast becomes one "from → 全体成员" feed entry of that group. */
 		recordBroadcastRelay(groupId, from, text) {
-			this.recordRelay(groupId, this.buildRelay(from, "*", text));
+			this.recordRelay(groupId, this.buildRelay(from, "*", text, this.mintId("bcast-")));
 		}
-		buildMessage(from, fromTitle, text) {
+		buildMessage(from, fromTitle, text, broadcast = false) {
 			return {
 				id: this.mintId("dsh-intercom-"),
 				role: "user",
@@ -457,7 +471,8 @@ let IntercomGateway = (() => {
 					plugin: "intercom",
 					form: "relay",
 					senderSessionId: from,
-					summary: "intercom relay"
+					summary: "intercom relay",
+					...broadcast ? { broadcast: true } : {}
 				}
 			};
 		}
@@ -535,7 +550,7 @@ let IntercomGateway = (() => {
 				error: "rate limit exceeded for target conversation"
 			};
 			const fromTitle = fromAgent === void 0 ? from : this.titleOf(fromAgent);
-			const message = this.buildMessage(from, fromTitle, text);
+			const message = this.buildMessage(from, fromTitle, text, request.broadcast === true);
 			let applied = "wake";
 			try {
 				if (delivery === "steer") {
@@ -563,7 +578,7 @@ let IntercomGateway = (() => {
 				};
 			}
 			this.autoAddToGroup([from, targetId]);
-			this.recordRelayForPair(from, targetId, text);
+			this.recordRelayForPair(from, targetId, text, message.id);
 			this.recordOutbox(from, message.id, targetId);
 			return {
 				ok: true,
@@ -573,6 +588,11 @@ let IntercomGateway = (() => {
 				targetStatus: target.status,
 				error: ""
 			};
+		}
+		/** Concatenated plain-text of a surface message; empty when there is none. */
+		messageText(message) {
+			if (message === void 0 || !Array.isArray(message.content)) return "";
+			return message.content.filter((block) => block !== null && typeof block === "object" && block.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
 		}
 		surfaceEntries(events, sinceTime) {
 			const entries = [];
@@ -800,7 +820,8 @@ let IntercomGateway = (() => {
 					from: request.from,
 					targetId: memberId,
 					text: request.text,
-					delivery: request.delivery
+					delivery: request.delivery,
+					broadcast: true
 				});
 				results.push({
 					targetId: memberId,
@@ -858,18 +879,62 @@ let IntercomGateway = (() => {
 			};
 			const sinceTime = request !== null && typeof request === "object" && typeof request.sinceTime === "number" ? request.sinceTime : 0;
 			const merged = [];
+			const backfill = [];
+			const seenDirect = /* @__PURE__ */ new Set();
+			const seenBroadcast = /* @__PURE__ */ new Set();
 			for (const memberId of group.members) try {
 				const surface = await this.queryService.readSurface(memberId);
 				const agent = this.agents.get(memberId);
-				const label = agent === void 0 ? memberId : this.titleOf(agent);
+				const label = agent === void 0 ? this.titleOfById(memberId) : this.titleOf(agent);
 				for (const entry of this.surfaceEntries(surface.events, sinceTime)) merged.push({
 					...entry,
 					memberId,
 					memberTitle: label
 				});
+				for (const event of surface.events) {
+					if (typeof event.time !== "number" || event.time <= sinceTime) continue;
+					const message = event.data?.message;
+					if (message === void 0 || message.source === void 0) continue;
+					const source = message.source;
+					if (source.kind !== "plugin" || source.plugin !== "intercom") continue;
+					if (typeof source.senderSessionId !== "string") continue;
+					const text = this.messageText(message);
+					if (text === "") continue;
+					if (source.broadcast === true) {
+						const key = `bc|${source.senderSessionId}|${text}`;
+						if (seenBroadcast.has(key)) continue;
+						seenBroadcast.add(key);
+						backfill.push({
+							id: this.mintId("relay-"),
+							messageId: key,
+							fromId: source.senderSessionId,
+							fromTitle: this.titleOfById(source.senderSessionId),
+							toId: "*",
+							toTitle: "全体成员",
+							text,
+							time: event.time
+						});
+					} else {
+						const mid = typeof message.id === "string" ? message.id : "";
+						if (mid !== "" && seenDirect.has(mid)) continue;
+						if (mid !== "") seenDirect.add(mid);
+						backfill.push({
+							id: this.mintId("relay-"),
+							messageId: mid,
+							fromId: source.senderSessionId,
+							fromTitle: this.titleOfById(source.senderSessionId),
+							toId: memberId,
+							toTitle: label,
+							text,
+							time: event.time
+						});
+					}
+				}
 			} catch {}
 			merged.sort((a, b) => a.time - b.time);
-			const relays = [...this.relayLog.get(groupId) ?? []].reverse();
+			const live = this.relayLog.get(groupId) ?? [];
+			const liveIds = new Set(live.map((r) => r.messageId).filter((id) => id !== ""));
+			const relays = [...backfill.filter((r) => r.messageId === "" || !liveIds.has(r.messageId)), ...live].sort((a, b) => b.time - a.time).slice(0, 200);
 			return {
 				ok: true,
 				entries: merged.slice(-200),
@@ -935,6 +1000,24 @@ let IntercomGateway = (() => {
 			};
 			const index = group.members.indexOf(memberId);
 			if (index !== -1) group.members.splice(index, 1);
+			this.persist();
+			return {
+				ok: true,
+				error: ""
+			};
+		}
+		removeGroup(request) {
+			const groupId = request === null || typeof request !== "object" ? "" : String(request.groupId ?? "");
+			if (groupId === AUTO_GROUP_ID) return {
+				ok: false,
+				error: "the automatic group cannot be removed"
+			};
+			if (!this.groupStore.has(groupId)) return {
+				ok: false,
+				error: `unknown group: ${groupId}`
+			};
+			this.groupStore.delete(groupId);
+			this.relayLog.delete(groupId);
 			this.persist();
 			return {
 				ok: true,
@@ -1783,6 +1866,43 @@ let IntercomGateway = (() => {
 						text: "",
 						error: result.error
 					};
+				}
+			})));
+			disposers.push(tools.register(defineTool({
+				name: "intercom_remove_group",
+				description: "Delete an explicit coordination group (对话群). The automatic group 「协作中的对话(自动)」cannot be removed. Removing a group only deletes the group record; the member conversations and their histories are untouched.",
+				parameters: { group_id: {
+					type: "string",
+					required: true,
+					description: "exact group id from intercom_list_groups (must not be the automatic group)"
+				} },
+				output: {
+					schema: {
+						type: "object",
+						additionalProperties: false,
+						properties: {
+							ok: {
+								type: "boolean",
+								required: true
+							},
+							error: {
+								type: "string",
+								required: true
+							}
+						}
+					},
+					render: (_args, value) => [{
+						type: "text",
+						text: value.ok ? "group removed" : `failed: ${value.error}`
+					}]
+				},
+				execute: async (args) => {
+					const result = this.removeGroup({ groupId: String(args.group_id) });
+					if (result.ok) return {
+						ok: true,
+						error: ""
+					};
+					throw new Error(result.error);
 				}
 			})));
 			ctx.effect(() => () => {

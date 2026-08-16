@@ -17,7 +17,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
-import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRequest, CreateGroupResult, DormantListResult, GroupInfo, GroupMemberRequest, OkResult, ReadConversationRequest, ReadConversationResult, ReadGroupRequest, ReadGroupResult, SendRequest, SendResult, WakeSendRequest, WakeSendResult } from './types.ts';
+import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRequest, CreateGroupResult, DormantListResult, GroupInfo, GroupMemberRequest, OkResult, ReadConversationRequest, ReadConversationResult, ReadGroupRequest, ReadGroupResult, RemoveGroupRequest, SendRequest, SendResult, WakeSendRequest, WakeSendResult } from './types.ts';
 export type * from './types.ts';
 export { intercomDomain } from './spec.ts';
 export declare class IntercomGateway extends TypertRemoteService {
@@ -69,6 +69,8 @@ export declare class IntercomGateway extends TypertRemoteService {
     private deliver;
     /** Shared delivery core: workspace gate, rate limit, wake/queue/steer, group bookkeeping. */
     private deliverTo;
+    /** Concatenated plain-text of a surface message; empty when there is none. */
+    private messageText;
     private surfaceEntries;
     private surfaceText;
     private lastAssistantText;
@@ -88,6 +90,7 @@ export declare class IntercomGateway extends TypertRemoteService {
     createGroup(request: CreateGroupRequest): CreateGroupResult;
     addMember(request: GroupMemberRequest): OkResult;
     removeMember(request: GroupMemberRequest): OkResult;
+    removeGroup(request: RemoveGroupRequest): OkResult;
     private registerTools;
 }
 export default IntercomGateway;

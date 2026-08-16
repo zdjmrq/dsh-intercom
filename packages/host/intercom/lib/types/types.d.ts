@@ -44,6 +44,8 @@ export type SendRequest = {
     delivery: string;
     /** Explicit opt-in for cross-workspace delivery. */
     allowCrossWorkspace?: boolean;
+    /** Marks the relayed message as part of a group broadcast (feed/backfill). */
+    broadcast?: boolean;
 };
 export type SendResult = {
     ok: boolean;
@@ -92,6 +94,8 @@ export type ReadGroupRequest = {
  */
 export type RelayEntry = {
     id: string;
+    /** Delivery message id the relay was recorded for (backfill dedupe key). */
+    messageId: string;
     fromId: string;
     fromTitle: string;
     /** Target member id, or `*` for a broadcast to every member. */
@@ -122,6 +126,9 @@ export type CreateGroupResult = {
 export type GroupMemberRequest = {
     groupId: string;
     memberId: string;
+};
+export type RemoveGroupRequest = {
+    groupId: string;
 };
 /** One dormant (persisted but not live) top-level session, projected for the panel. */
 export type DormantConversation = {

@@ -192,6 +192,7 @@ window.__ModuleLoader__.load({
 			const [delivery, setDelivery] = (0, react.useState)("wake");
 			const [newGroupName, setNewGroupName] = (0, react.useState)("");
 			const [addMemberId, setAddMemberId] = (0, react.useState)("");
+			const [confirmDeleteGroup, setConfirmDeleteGroup] = (0, react.useState)(false);
 			const [feedback, setFeedback] = (0, react.useState)({
 				text: "",
 				tone: ""
@@ -400,6 +401,25 @@ window.__ModuleLoader__.load({
 					refreshLists();
 				} catch {}
 			};
+			const deleteGroup = async () => {
+				if (groupId === "" || groupId === "__auto") return;
+				if (!confirmDeleteGroup) {
+					setConfirmDeleteGroup(true);
+					return;
+				}
+				try {
+					const r = await remote.removeGroup({ groupId });
+					if (r.ok && r.value !== void 0 && r.value.ok) {
+						say("已删除群", "ok");
+						setConfirmDeleteGroup(false);
+						setGroupId("");
+						refreshLists();
+						refreshHistory();
+					} else say(`删除失败: ${r.value?.error ?? r.error?.message ?? "unknown"}`, "err");
+				} catch (error) {
+					say(`删除异常: ${String(error instanceof Error ? error.message : error)}`, "err");
+				}
+			};
 			const openSession = (id) => {
 				try {
 					sessions.open(id);
@@ -489,7 +509,10 @@ window.__ModuleLoader__.load({
 			}, `📁 ${d.cwd || ""}`)))) : (0, react.createElement)("div", { className: "dsh-ic-list" }, groups.map((g) => (0, react.createElement)("div", {
 				key: g.id,
 				className: "dsh-ic-item" + (g.id === groupId ? " active" : ""),
-				onClick: () => setGroupId(g.id)
+				onClick: () => {
+					setGroupId(g.id);
+					setConfirmDeleteGroup(false);
+				}
 			}, (0, react.createElement)("div", { className: "dsh-ic-item-head" }, (0, react.createElement)("span", {
 				className: "dsh-ic-item-title",
 				title: g.id
@@ -539,7 +562,17 @@ window.__ModuleLoader__.load({
 				},
 				disabled: addMemberId === "",
 				style: { marginTop: 4 }
-			}, "添加")) : null)), (0, react.createElement)("div", { className: "dsh-ic-main" }, (0, react.createElement)("div", { className: "dsh-ic-chat-head" }, (0, react.createElement)("span", {
+			}, "添加")) : null, currentGroup !== void 0 && currentGroup.id !== "__auto" ? (0, react.createElement)("button", {
+				className: "dsh-ic-btn",
+				style: {
+					marginTop: 12,
+					color: "var(--dsw-alias-state-danger-primary, #d1242f)",
+					borderColor: "color-mix(in srgb, var(--dsw-alias-state-danger-primary, #d1242f) 55%, transparent)"
+				},
+				onClick: () => {
+					deleteGroup();
+				}
+			}, confirmDeleteGroup ? "⚠ 确认删除?再点一次执行" : "🗑 删除本群") : null)), (0, react.createElement)("div", { className: "dsh-ic-main" }, (0, react.createElement)("div", { className: "dsh-ic-chat-head" }, (0, react.createElement)("span", {
 				className: "dsh-ic-chat-title",
 				title: currentTitle
 			}, currentTitle), tab === "conv" && currentConv !== void 0 ? (0, react.createElement)("span", { className: "dsh-ic-badge " + (currentConv.status === "running" ? "running" : "idle") }, currentConv.status === "running" ? "忙碌" : "空闲") : null, tab === "conv" && currentConv === void 0 && currentDormant !== void 0 ? (0, react.createElement)("span", { className: "dsh-ic-badge idle" }, "💤 休眠 · 发送即唤醒") : null, tab === "conv" && convId !== "" ? (0, react.createElement)("button", {

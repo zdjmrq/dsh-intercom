@@ -3,7 +3,7 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRequest, CreateGroupResult, DormantListResult, GroupInfo, GroupMemberRequest, OkResult, ReadConversationRequest, ReadConversationResult, ReadGroupRequest, ReadGroupResult, SendRequest, SendResult, WakeSendRequest, WakeSendResult } from '@deepseek-ai/dsh-host-intercom/types'
+import type { BroadcastRequest, BroadcastResult, ConversationInfo, CreateGroupRequest, CreateGroupResult, DormantListResult, GroupInfo, GroupMemberRequest, OkResult, ReadConversationRequest, ReadConversationResult, ReadGroupRequest, ReadGroupResult, RemoveGroupRequest, SendRequest, SendResult, WakeSendRequest, WakeSendResult } from '@deepseek-ai/dsh-host-intercom/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$696e746572636f6d {
@@ -15,6 +15,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     list: () => Promise<RemoteResult<ConversationInfo[]>>
     readConversation: (request: ReadConversationRequest) => Promise<RemoteResult<ReadConversationResult>>
     readGroup: (request: ReadGroupRequest) => Promise<RemoteResult<ReadGroupResult>>
+    removeGroup: (request: RemoveGroupRequest) => Promise<RemoteResult<OkResult>>
     removeMember: (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
     send: (request: SendRequest) => Promise<RemoteResult<SendResult>>
     wakeSend: (request: WakeSendRequest) => Promise<RemoteResult<WakeSendResult>>
@@ -28,6 +29,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'intercom/list': () => Promise<RemoteResult<ConversationInfo[]>>
     'intercom/readConversation': (request: ReadConversationRequest) => Promise<RemoteResult<ReadConversationResult>>
     'intercom/readGroup': (request: ReadGroupRequest) => Promise<RemoteResult<ReadGroupResult>>
+    'intercom/removeGroup': (request: RemoveGroupRequest) => Promise<RemoteResult<OkResult>>
     'intercom/removeMember': (request: GroupMemberRequest) => Promise<RemoteResult<OkResult>>
     'intercom/send': (request: SendRequest) => Promise<RemoteResult<SendResult>>
     'intercom/wakeSend': (request: WakeSendRequest) => Promise<RemoteResult<WakeSendResult>>

@@ -142,6 +142,12 @@ interface RemoteFace {
         ok: boolean;
         error: string;
     }>>;
+    removeGroup(request: {
+        groupId: string;
+    }): Promise<RemoteEnvelope<{
+        ok: boolean;
+        error: string;
+    }>>;
 }
 interface SessionsFace {
     open(id: string): void;

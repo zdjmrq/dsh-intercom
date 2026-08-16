@@ -91,6 +91,7 @@ const _deepseek_ai_dsh_host_intercom_intercom_readGroup_result$schema = z.object
 })),
   'relays': z.array(z.object({
   'id': z.string(),
+  'messageId': z.string(),
   'fromId': z.string(),
   'fromTitle': z.string(),
   'toId': z.string(),
@@ -98,6 +99,13 @@ const _deepseek_ai_dsh_host_intercom_intercom_readGroup_result$schema = z.object
   'text': z.string(),
   'time': z.number(),
 })),
+  'error': z.string(),
+})
+const _deepseek_ai_dsh_host_intercom_intercom_removeGroup_parameter_0$schema = z.object({
+  'groupId': z.string(),
+})
+const _deepseek_ai_dsh_host_intercom_intercom_removeGroup_result$schema = z.object({
+  'ok': z.boolean(),
   'error': z.string(),
 })
 const _deepseek_ai_dsh_host_intercom_intercom_removeMember_parameter_0$schema = z.object({
@@ -114,6 +122,7 @@ const _deepseek_ai_dsh_host_intercom_intercom_send_parameter_0$schema = z.object
   'text': z.string(),
   'delivery': z.string(),
   'allowCrossWorkspace': z.boolean().optional(),
+  'broadcast': z.boolean().optional(),
 })
 const _deepseek_ai_dsh_host_intercom_intercom_send_result$schema = z.object({
   'ok': z.boolean(),
@@ -169,7 +178,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#OkResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_addMember_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":682,"column":3},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":747,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/broadcast',
@@ -194,7 +203,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#BroadcastResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_broadcast_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":612,"column":3},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":630,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/createGroup',
@@ -219,7 +228,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#CreateGroupResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_createGroup_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":666,"column":3},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":731,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/dormant',
@@ -234,7 +243,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#DormantListResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_dormant_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":532,"column":9},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":550,"column":9},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/groups',
@@ -249,7 +258,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom#intercom/groups:result',
         schema: _deepseek_ai_dsh_host_intercom_intercom_groups_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":514,"column":3},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":532,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/list',
@@ -264,7 +273,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom#intercom/list:result',
         schema: _deepseek_ai_dsh_host_intercom_intercom_list_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":502,"column":3},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":520,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/readConversation',
@@ -289,7 +298,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#ReadConversationResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_readConversation_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":629,"column":9},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":647,"column":9},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/readGroup',
@@ -314,7 +323,32 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#ReadGroupResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_readGroup_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":643,"column":9},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":661,"column":9},
+    },
+    {
+      id: '@deepseek-ai/dsh-host-intercom#intercom/removeGroup',
+      service: 'intercom',
+      namespace: 'intercom',
+      method: 'removeGroup',
+      invocation: { kind: 'direct' },
+      parameters: [
+        {
+          name: 'request',
+          wire: 'request',
+          source: 'json',
+          codec: {
+            mode: 'strict',
+            typeSymbol: '@deepseek-ai/dsh-host-intercom/types#RemoveGroupRequest',
+            schema: _deepseek_ai_dsh_host_intercom_intercom_removeGroup_parameter_0$schema,
+          },
+        },
+      ],
+      result: {
+        mode: 'strict',
+        typeSymbol: '@deepseek-ai/dsh-host-intercom/types#OkResult',
+        schema: _deepseek_ai_dsh_host_intercom_intercom_removeGroup_result$schema,
+      },
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":772,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/removeMember',
@@ -339,7 +373,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#OkResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_removeMember_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":695,"column":3},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":760,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/send',
@@ -364,7 +398,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#SendResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_send_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":524,"column":3},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":542,"column":3},
     },
     {
       id: '@deepseek-ai/dsh-host-intercom#intercom/wakeSend',
@@ -389,7 +423,7 @@ export const TYPERT = {
         typeSymbol: '@deepseek-ai/dsh-host-intercom/types#WakeSendResult',
         schema: _deepseek_ai_dsh_host_intercom_intercom_wakeSend_result$schema,
       },
-      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":561,"column":9},
+      sourceLocation: {"file":"packages/host/intercom/src/index.ts","line":579,"column":9},
     },
   ],
   model: {

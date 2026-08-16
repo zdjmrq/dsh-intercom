@@ -38,6 +38,7 @@ import type {
   ReadGroupRequest,
   ReadGroupResult,
   RelayEntry,
+  RemoveGroupRequest,
   SendRequest,
   SendResult,
   WakeSendRequest,
@@ -77,7 +78,7 @@ interface TitleService {
 }
 
 interface ContentBlockLike { type: string; text?: string }
-interface SurfaceMessageLike { id?: string; content?: ContentBlockLike[] }
+interface SurfaceMessageLike { id?: string; content?: ContentBlockLike[]; source?: { kind?: string; plugin?: string; senderSessionId?: string; broadcast?: boolean } }
 interface SurfaceEventLike { type: string; time?: number; data?: { message?: SurfaceMessageLike } }
 interface QueryService {
   readSurface(sessionId: string): Promise<{ events: SurfaceEventLike[] }>
@@ -330,11 +331,12 @@ export class IntercomGateway extends TypertRemoteService {
     this.relayLog.set(groupId, list)
   }
 
-  private buildRelay(from: string, toId: string, text: string): RelayEntry {
+  private buildRelay(from: string, toId: string, text: string, messageId: string): RelayEntry {
     const fromAgent = this.agents.get(from)
     const toAgent = toId === '*' ? undefined : this.agents.get(toId)
     return {
       id: this.mintId('relay-'),
+      messageId,
       fromId: from,
       fromTitle: fromAgent === undefined ? from : this.titleOf(fromAgent),
       toId,
@@ -345,8 +347,8 @@ export class IntercomGateway extends TypertRemoteService {
   }
 
   /** A direct send becomes a feed entry of every group containing both parties. */
-  private recordRelayForPair(from: string, targetId: string, text: string): void {
-    const relay = this.buildRelay(from, targetId, text)
+  private recordRelayForPair(from: string, targetId: string, text: string, messageId: string): void {
+    const relay = this.buildRelay(from, targetId, text, messageId)
     for (const [groupId, group] of this.groupStore) {
       if (group.members.includes(from) && group.members.includes(targetId)) this.recordRelay(groupId, relay)
     }
@@ -354,15 +356,22 @@ export class IntercomGateway extends TypertRemoteService {
 
   /** A broadcast becomes one "from → 全体成员" feed entry of that group. */
   private recordBroadcastRelay(groupId: string, from: string, text: string): void {
-    this.recordRelay(groupId, this.buildRelay(from, '*', text))
+    this.recordRelay(groupId, this.buildRelay(from, '*', text, this.mintId('bcast-')))
   }
 
-  private buildMessage(from: string, fromTitle: string, text: string): unknown {
+  private buildMessage(from: string, fromTitle: string, text: string, broadcast = false): unknown {
     return {
       id: this.mintId('dsh-intercom-'),
       role: 'user',
       content: [{ type: 'text', text: `[intercom] 来自会话「${fromTitle}」的消息,请先评估其合理性再行动:\n${text}` }],
-      source: { kind: 'plugin', plugin: 'intercom', form: 'relay', senderSessionId: from, summary: 'intercom relay' },
+      source: {
+        kind: 'plugin',
+        plugin: 'intercom',
+        form: 'relay',
+        senderSessionId: from,
+        summary: 'intercom relay',
+        ...(broadcast ? { broadcast: true } : {}),
+      },
     }
   }
 
@@ -384,7 +393,7 @@ export class IntercomGateway extends TypertRemoteService {
   }
 
   /** Shared delivery core: workspace gate, rate limit, wake/queue/steer, group bookkeeping. */
-  private deliverTo(from: string, target: AgentLike, request: { text: string; delivery: string; allowCrossWorkspace?: boolean }): SendResult {
+  private deliverTo(from: string, target: AgentLike, request: { text: string; delivery: string; allowCrossWorkspace?: boolean; broadcast?: boolean }): SendResult {
     const targetId = target.id
     const text = String(request.text).slice(0, MAX_TEXT)
     const delivery = request.delivery === 'steer' ? 'steer' : 'wake'
@@ -398,7 +407,7 @@ export class IntercomGateway extends TypertRemoteService {
     }
     if (!this.rateAllowed(targetId)) return { ok: false, messageId: '', applied: '', targetId, targetStatus: '', error: 'rate limit exceeded for target conversation' }
     const fromTitle = fromAgent === undefined ? from : this.titleOf(fromAgent)
-    const message = this.buildMessage(from, fromTitle, text)
+    const message = this.buildMessage(from, fromTitle, text, request.broadcast === true)
     let applied = 'wake'
     try {
       if (delivery === 'steer') {
@@ -419,9 +428,18 @@ export class IntercomGateway extends TypertRemoteService {
       return { ok: false, messageId: '', applied: '', targetId, targetStatus: '', error: `delivery failed: ${String(error instanceof Error ? error.message : error)}` }
     }
     this.autoAddToGroup([from, targetId])
-    this.recordRelayForPair(from, targetId, text)
+    this.recordRelayForPair(from, targetId, text, (message as { id: string }).id)
     this.recordOutbox(from, (message as { id: string }).id, targetId)
     return { ok: true, messageId: (message as { id: string }).id, applied, targetId, targetStatus: target.status, error: '' }
+  }
+
+  /** Concatenated plain-text of a surface message; empty when there is none. */
+  private messageText(message: SurfaceMessageLike | undefined): string {
+    if (message === undefined || !Array.isArray(message.content)) return ''
+    return message.content
+      .filter(block => block !== null && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string')
+      .map(block => block.text as string)
+      .join('\n')
   }
 
   private surfaceEntries(events: SurfaceEventLike[], sinceTime: number): MessageEntry[] {
@@ -618,7 +636,7 @@ export class IntercomGateway extends TypertRemoteService {
     const results: BroadcastMemberResult[] = []
     for (const memberId of group.members) {
       if (memberId === request.from) continue
-      const r = this.deliver({ from: request.from, targetId: memberId, text: request.text, delivery: request.delivery })
+      const r = this.deliver({ from: request.from, targetId: memberId, text: request.text, delivery: request.delivery, broadcast: true })
       results.push({ targetId: memberId, ok: r.ok, applied: r.applied, error: r.error })
     }
     this.recordBroadcastRelay(request.groupId, request.from, String(request.text).slice(0, MAX_TEXT))
@@ -647,18 +665,65 @@ export class IntercomGateway extends TypertRemoteService {
     if (this.queryService === undefined) return { ok: false, entries: [], relays: [], error: 'sessionQuery service unavailable' }
     const sinceTime = request !== null && typeof request === 'object' && typeof request.sinceTime === 'number' ? request.sinceTime : 0
     const merged: MessageEntry[] = []
+    const backfill: RelayEntry[] = []
+    const seenDirect = new Set<string>()
+    const seenBroadcast = new Set<string>()
     for (const memberId of group.members) {
       try {
         const surface = await this.queryService.readSurface(memberId)
         const agent = this.agents.get(memberId)
-        const label = agent === undefined ? memberId : this.titleOf(agent)
+        const label = agent === undefined ? this.titleOfById(memberId) : this.titleOf(agent)
         for (const entry of this.surfaceEntries(surface.events, sinceTime)) {
           merged.push({ ...entry, memberId, memberTitle: label })
+        }
+        // Backfill the relay feed from the persisted relay messages, so the
+        // directed view ("A → B" / "A → 全体") survives backend restarts.
+        for (const event of surface.events) {
+          if (typeof event.time !== 'number' || event.time <= sinceTime) continue
+          const message = event.data?.message
+          if (message === undefined || message.source === undefined) continue
+          const source = message.source
+          if (source.kind !== 'plugin' || source.plugin !== 'intercom') continue
+          if (typeof source.senderSessionId !== 'string') continue
+          const text = this.messageText(message)
+          if (text === '') continue
+          if (source.broadcast === true) {
+            const key = `bc|${source.senderSessionId}|${text}`
+            if (seenBroadcast.has(key)) continue
+            seenBroadcast.add(key)
+            backfill.push({
+              id: this.mintId('relay-'),
+              messageId: key,
+              fromId: source.senderSessionId,
+              fromTitle: this.titleOfById(source.senderSessionId),
+              toId: '*',
+              toTitle: '全体成员',
+              text,
+              time: event.time,
+            })
+          } else {
+            const mid = typeof message.id === 'string' ? message.id : ''
+            if (mid !== '' && seenDirect.has(mid)) continue
+            if (mid !== '') seenDirect.add(mid)
+            backfill.push({
+              id: this.mintId('relay-'),
+              messageId: mid,
+              fromId: source.senderSessionId,
+              fromTitle: this.titleOfById(source.senderSessionId),
+              toId: memberId,
+              toTitle: label,
+              text,
+              time: event.time,
+            })
+          }
         }
       } catch { /* skip unreadable member */ }
     }
     merged.sort((a, b) => a.time - b.time)
-    const relays = [...(this.relayLog.get(groupId) ?? [])].reverse()
+    const live = this.relayLog.get(groupId) ?? []
+    const liveIds = new Set(live.map(r => r.messageId).filter(id => id !== ''))
+    const filtered = backfill.filter(r => r.messageId === '' || !liveIds.has(r.messageId))
+    const relays = [...filtered, ...live].sort((a, b) => b.time - a.time).slice(0, 200)
     return { ok: true, entries: merged.slice(-200), relays, error: '' }
   }
 
@@ -699,6 +764,17 @@ export class IntercomGateway extends TypertRemoteService {
     if (group === undefined) return { ok: false, error: 'unknown group' }
     const index = group.members.indexOf(memberId)
     if (index !== -1) group.members.splice(index, 1)
+    this.persist()
+    return { ok: true, error: '' }
+  }
+
+  @Remote('removeGroup')
+  removeGroup(request: RemoveGroupRequest): OkResult {
+    const groupId = request === null || typeof request !== 'object' ? '' : String(request.groupId ?? '')
+    if (groupId === AUTO_GROUP_ID) return { ok: false, error: 'the automatic group cannot be removed' }
+    if (!this.groupStore.has(groupId)) return { ok: false, error: `unknown group: ${groupId}` }
+    this.groupStore.delete(groupId)
+    this.relayLog.delete(groupId)
     this.persist()
     return { ok: true, error: '' }
   }
@@ -1022,6 +1098,23 @@ export class IntercomGateway extends TypertRemoteService {
           return { ok: true, groupId: String(args.group_id), text, error: '' }
         }
         return { ok: false, groupId: String(args.group_id), text: '', error: result.error }
+      },
+    })))
+
+    disposers.push(tools.register(defineTool({
+      name: 'intercom_remove_group',
+      description: 'Delete an explicit coordination group (对话群). The automatic group 「协作中的对话(自动)」cannot be removed. Removing a group only deletes the group record; the member conversations and their histories are untouched.',
+      parameters: {
+        group_id: { type: 'string', required: true, description: 'exact group id from intercom_list_groups (must not be the automatic group)' },
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true }, error: { type: 'string', required: true } } },
+        render: (_args: unknown, value: unknown) => [{ type: 'text', text: (value as { ok: boolean }).ok ? 'group removed' : `failed: ${(value as { error: string }).error}` }],
+      },
+      execute: async (args: { group_id?: unknown }) => {
+        const result = this.removeGroup({ groupId: String(args.group_id) })
+        if (result.ok) return { ok: true, error: '' }
+        throw new Error(result.error)
       },
     })))
 

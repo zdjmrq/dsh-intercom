@@ -100,6 +100,7 @@ interface RemoteFace {
   createGroup(request: { name: string; memberIds: string }): Promise<RemoteEnvelope<{ ok: boolean; groupId: string; name: string; memberCount: number; error: string }>>
   addMember(request: { groupId: string; memberId: string }): Promise<RemoteEnvelope<{ ok: boolean; error: string }>>
   removeMember(request: { groupId: string; memberId: string }): Promise<RemoteEnvelope<{ ok: boolean; error: string }>>
+  removeGroup(request: { groupId: string }): Promise<RemoteEnvelope<{ ok: boolean; error: string }>>
 }
 
 interface SessionsFace {
@@ -216,6 +217,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
   const [delivery, setDelivery] = useState('wake')
   const [newGroupName, setNewGroupName] = useState('')
   const [addMemberId, setAddMemberId] = useState('')
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false)
   const [feedback, setFeedback] = useState<{ text: string; tone: string }>({ text: '', tone: '' })
 
   const say = (message: string, tone = ''): void => { setFeedback({ text: message, tone }) }
@@ -367,6 +369,21 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
     } catch { /* best-effort */ }
   }
 
+  const deleteGroup = async (): Promise<void> => {
+    if (groupId === '' || groupId === '__auto') return
+    if (!confirmDeleteGroup) { setConfirmDeleteGroup(true); return }
+    try {
+      const r = await remote.removeGroup({ groupId })
+      if (r.ok && r.value !== undefined && r.value.ok) {
+        say('已删除群', 'ok')
+        setConfirmDeleteGroup(false)
+        setGroupId('')
+        void refreshLists()
+        void refreshHistory()
+      } else say(`删除失败: ${r.value?.error ?? r.error?.message ?? 'unknown'}`, 'err')
+    } catch (error) { say(`删除异常: ${String(error instanceof Error ? error.message : error)}`, 'err') }
+  }
+
   const openSession = (id: string): void => {
     try { sessions.open(id) } catch { say('client sessions service unavailable', 'err') }
   }
@@ -425,7 +442,7 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
               )),
             )
           : h('div', { className: 'dsh-ic-list' },
-              groups.map(g => h('div', { key: g.id, className: 'dsh-ic-item' + (g.id === groupId ? ' active' : ''), onClick: () => setGroupId(g.id) },
+              groups.map(g => h('div', { key: g.id, className: 'dsh-ic-item' + (g.id === groupId ? ' active' : ''), onClick: () => { setGroupId(g.id); setConfirmDeleteGroup(false) } },
                 h('div', { className: 'dsh-ic-item-head' },
                   h('span', { className: 'dsh-ic-item-title', title: g.id }, g.name),
                   h('span', { className: 'dsh-ic-badge idle' }, `${g.memberCount} 人`),
@@ -447,6 +464,11 @@ const IntercomPanel: FunctionComponent<PanelProps> = (props) => {
                 ),
                 h('button', { className: 'dsh-ic-btn', onClick: () => { void addMember() }, disabled: addMemberId === '', style: { marginTop: 4 } }, '添加'),
               ) : null,
+              currentGroup !== undefined && currentGroup.id !== '__auto' ? h('button', {
+                className: 'dsh-ic-btn',
+                style: { marginTop: 12, color: 'var(--dsw-alias-state-danger-primary, #d1242f)', borderColor: 'color-mix(in srgb, var(--dsw-alias-state-danger-primary, #d1242f) 55%, transparent)' },
+                onClick: () => { void deleteGroup() },
+              }, confirmDeleteGroup ? '⚠ 确认删除?再点一次执行' : '🗑 删除本群') : null,
             ),
       ),
       h('div', { className: 'dsh-ic-main' },
