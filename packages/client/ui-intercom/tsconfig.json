@@ -1,5 +1,5 @@
 {
-  "extends": "../../../tsconfig.base.json",
+  "extends": "../../../tsconfig.base.client.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib/types"
@@ -18,10 +18,10 @@
       "path": "../../api/remotes/tsconfig.client.json"
     },
     {
-      "path": "../../client/runtime"
+      "path": "../../client/ui-layout"
     },
     {
-      "path": "../../client/ui-layout"
+      "path": "../../client/ui-renderer"
     },
     {
       "path": "../../client/ui-sidebar"
